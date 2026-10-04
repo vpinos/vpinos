@@ -15,7 +15,63 @@
 # specifically, same narrow-scope reasoning as every other rule there.
 set -e
 
+# Releases the kernel's own framebuffer console from whichever DRM
+# driver currently owns it -- required before that driver's kernel
+# module can actually be removed. Confirmed directly as the real root
+# cause of a driver-switch failure on real NVIDIA hardware (a GTX 1650):
+# `modprobe -r nouveau` below looked harmless (failures silently
+# discarded by `|| true`) but was actually failing every time, visible
+# directly in `dmesg` as "GPU ... is already bound to nouveau" / "No
+# NVIDIA devices probed" immediately after -- nouveau was never
+# unloaded, so nvidia's own probe correctly found the device still
+# owned by nouveau and refused it. Root cause: nouveau is always
+# actively bound to the real VT console at the point this script runs
+# -- vpinos-menu's own text console deliberately runs on nouveau's real
+# KMS driver (see 0120-install-nvidia-driver.hook.chroot's own history
+# on why the nouveau blacklist is removed), and the kernel refuses to
+# unload any module its own framebuffer console (fbcon) still holds a
+# reference to, no matter what `modprobe -r`'s exit code says. Writing
+# `0` to the bound vtconsole's own `bind` file releases that reference
+# first. Symmetric problem in the reverse direction too -- switching
+# back to "default" mode while nvidia-drm's own fbdev=1 console (from a
+# previous "nvidia" session) is what's currently bound -- so this runs
+# before both directions' module removal, not just the nvidia branch.
+unbind_fbcon() {
+    for vtcon in /sys/class/vtconsole/vtcon*; do
+        [ -e "$vtcon/name" ] || continue
+        grep -q "frame buffer device" "$vtcon/name" 2>/dev/null \
+            && echo 0 > "$vtcon/bind" 2>/dev/null
+    done
+    return 0
+}
+
 mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
+
+# Skip the whole unbind/modprobe dance entirely when the right driver
+# is already bound -- a real report, confirmed directly: doing it
+# unconditionally on *every* launch (as this script originally did)
+# caused two real symptoms on a real multi-launch session (vpinfe, then
+# vpinball, both in "default" mode, no actual switch ever needed
+# between them): launches got noticeably slower, and -- worse -- the
+# vpinos-menu text console stopped updating after exiting back to it
+# entirely (menu kept running fine, new selections still launched, the
+# screen just never repainted again). Root cause: unbind_fbcon()
+# unconditionally released the console's framebuffer binding every
+# time, but nothing ever rebinds it -- the kernel only auto-rebinds a
+# vtconsole when a driver is freshly (re)loaded and registers a new
+# framebuffer; if the driver was already loaded and nothing actually
+# got removed/reloaded (the common case -- most sessions don't flip
+# gpu-driver mode between every single launch), no new framebuffer ever
+# gets registered, so the explicitly-unbound vtconsole just stays
+# unbound forever, with nothing left attached to draw the console.
+# Checking already-loaded modules first and skipping entirely when
+# they already match the desired mode avoids ever unbinding anything
+# that doesn't need to change, which sidesteps this permanently rather
+# than trying to add a matching rebind step.
+case "$mode" in
+    nvidia) lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' && exit 0 ;;
+    *) lsmod | grep -q '^nouveau ' && ! lsmod | grep -q '^nvidia ' && exit 0 ;;
+esac
 
 case "$mode" in
     nvidia)
@@ -23,7 +79,10 @@ case "$mode" in
         # bound -- the kernel auto-loads it via udev/module aliases as
         # soon as it sees NVIDIA hardware, same as amdgpu for AMD cards,
         # well before this script ever runs. It has to be unloaded
-        # before nvidia.ko can claim the device.
+        # before nvidia.ko can claim the device. unbind_fbcon first --
+        # see its own comment above; without it this modprobe silently
+        # fails every time and nvidia never actually gets the GPU.
+        unbind_fbcon
         modprobe -r nouveau 2>/dev/null || true
         modprobe nvidia 2>/dev/null \
             || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia failed -- no NVIDIA hardware, or the precompiled module doesn't match this kernel?" >>/var/log/vpinos-menu.log
@@ -37,22 +96,29 @@ case "$mode" in
         # the log line above can distinguish "no NVIDIA hardware at all"
         # from a problem specific to the DRM layer.
         #
-        # fbdev=1: a real report, confirmed directly, of the console
-        # going black returning from Hyprland/vpinball back to the
-        # vpinos-menu text console with "nvidia" mode selected --
-        # exactly the documented purpose of this flag (per
-        # https://wiki.hypr.land/Nvidia/): without an fbdev-backed
-        # console on the nvidia-drm KMS device, there's nothing for the
-        # kernel's own fbcon to fall back to once Hyprland releases DRM
-        # master. Confirmed this exact driver build genuinely supports
-        # it -- checked the actual shipped nvidia-current-drm.ko's own
-        # module parameter info directly, not assumed from a general
-        # "needs 555+" rule some other NVIDIA driver versions follow;
-        # this sid-sourced 550.163.01-5.1 build (see vpinos-sid.pref --
-        # pulled from sid specifically for unrelated VMA-locking
-        # backports) has it.
-        modprobe nvidia-drm modeset=1 fbdev=1 2>/dev/null \
-            || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 fbdev=1 failed" >>/var/log/vpinos-menu.log
+        # fbdev=1 -- REMOVED, real regression, confirmed directly on
+        # real hardware (a GTX 1650). Originally added for a real report
+        # of the console going black returning from Hyprland/vpinball
+        # with "nvidia" mode selected, on the documented theory (per
+        # https://wiki.hypr.land/Nvidia/) that an fbdev-backed console
+        # on the nvidia-drm KMS device is what the kernel's own fbcon
+        # falls back to once Hyprland releases DRM master. That
+        # diagnosis turned out to be wrong -- the real cause of that
+        # exact symptom was `unbind_fbcon()` below running
+        # unconditionally on every launch with nothing ever rebinding
+        # afterward (see that function's own comment), present in BOTH
+        # branches of this script, not nvidia-specific at all; fixed
+        # properly by the early-exit check above. With that real fix in
+        # place, `fbdev=1` turned out to be pure liability: confirmed
+        # directly producing corrupted/garbled console output on real
+        # hardware once active, and a real SSH session hang attempting
+        # `rmmod nvidia_drm` afterward -- consistent with its own
+        # `(EXPERIMENTAL)` label (confirmed via this exact module's own
+        # parameter description) rather than mature, production-ready
+        # behavior. `modeset=1` alone is NVIDIA's own well-documented,
+        # non-experimental requirement and is unaffected by any of this.
+        modprobe nvidia-drm modeset=1 2>/dev/null \
+            || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 failed" >>/var/log/vpinos-menu.log
         ;;
     *)
         # Default/anything unrecognized: plain open-source Mesa (NVK on
@@ -73,6 +139,7 @@ case "$mode" in
         # hardware IDs to a driver) -- it does not block an explicit
         # `modprobe nouveau` by exact name, which is exactly what this
         # does.
+        unbind_fbcon
         modprobe -r nvidia-drm 2>/dev/null || true
         modprobe -r nvidia 2>/dev/null || true
         modprobe nouveau 2>/dev/null || true

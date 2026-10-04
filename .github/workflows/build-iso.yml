@@ -59,8 +59,13 @@ jobs:
               --linux-flavours ${{ matrix.arch }} \
               ${{ matrix.lb_args }} \
               --archive-areas "main contrib non-free non-free-firmware" \
-              --backports true \
               --bootappend-live "boot=live components username=vpinos"
+          # NOT --backports true -- trixie-backports now comes from
+          # config/archives/vpinos-backports.list instead, pinned to a
+          # frozen snapshot.debian.org timestamp after the live mirror's
+          # kernel packaging proved actively unreliable (see that file's
+          # own comment). Must stay in sync with notes/vpinos.md step 2
+          # and the build-vpinos-iso skill -- if one changes, change all.
 
       # Only the directories lb config generates -- never the whole
       # project: chown -R over cache/ corrupts the bootstrap tree

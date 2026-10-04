@@ -18,12 +18,22 @@ set -e
 # depends on -- confirmed via packages.debian.org, trixie's
 # non-free-firmware component, already enabled by this image's
 # --archive-areas) against whatever kernel is already installed in
-# this chroot by this point (linux-image-amd64, from the main package
-# list, installed well before any hook runs). DKMS just builds against
-# whatever kernel headers are present -- nothing here is pinned to a
-# specific kernel version, so this automatically tracks whatever this
-# image ships, including future trixie-backports kernel bumps, with no
-# changes needed in this file.
+# this chroot by this point (linux-image-7.1.13+deb13-amd64, from the
+# main package list, installed well before any hook runs). DKMS just
+# builds against whatever kernel headers are present.
+#
+# linux-headers-7.1.13+deb13-amd64 below, NOT the generic
+# linux-headers-amd64 metapackage -- must match whatever
+# vpinos.list.chroot actually installs, by exact ABI version, since
+# this project now pins both the kernel and the backports source
+# itself (config/archives/vpinos-backports.list, a frozen
+# snapshot.debian.org timestamp) rather than tracking the live mirror.
+# Using the generic metapackage here would risk resolving to a
+# different ABI than what's actually installed and silently building
+# headers for the wrong kernel -- a much more confusing DKMS failure
+# than an outright missing-candidate error. Whenever
+# vpinos.list.chroot's pinned version changes, this must change to
+# match.
 #
 # Pulls nvidia-graphics-drivers from sid specifically (see
 # config/archives/vpinos-sid.list/.pref) -- confirmed via a real failed
@@ -83,7 +93,7 @@ set -e
 # modprobe only needs the .ko(.xz) file present under
 # /lib/modules/<kver>/ and depmod's module-alias database kept current;
 # neither depends on dkms's own bookkeeping surviving.
-apt-get install -y linux-headers-amd64 build-essential dkms nvidia-driver
+apt-get install -y linux-headers-7.1.13+deb13-amd64 build-essential dkms nvidia-driver
 
 kver=$(ls /lib/modules)
 backup_dir=/root/nvidia-module-backup
@@ -111,7 +121,7 @@ apt-mark manual $(dpkg-query -W -f='${Package}\n' | grep -iE 'nvidia|cuda')
 # script) until this hook's build step is effectively redone, i.e. the
 # ISO is rebuilt. Not solved here -- flagging it rather than silently
 # shipping a driver that can go stale after an unrelated kernel update.
-apt-get purge -y nvidia-driver nvidia-kernel-dkms dkms build-essential linux-headers-amd64
+apt-get purge -y nvidia-driver nvidia-kernel-dkms dkms build-essential linux-headers-7.1.13+deb13-amd64
 apt-get autoremove -y
 
 # `apt-get autoremove` alone, even run twice, does NOT fully sweep this
@@ -261,28 +271,33 @@ rm -f /etc/modprobe.d/nvidia-blacklists-nouveau.conf
 # hardware, unless "nvidia" mode is explicitly selected.
 echo "blacklist nvidia" > /etc/modprobe.d/vpinos-nvidia-no-autoload.conf
 
-# Persistent modeset=1/fbdev=1, as a belt-and-suspenders second layer on
-# top of vpinos-gpu-driver.sh's own explicit `modprobe nvidia-drm
-# modeset=1 fbdev=1` call (see notes/nvidia-proprietary.md's "Hyprland/
-# Wayland fixes" section for the real symptoms each flag fixes -- a
-# black Table screen under direct scanout for the general nvidia setup,
-# and a black console returning from Hyprland specifically for fbdev).
-# This file matters because this exact class of bug already happened
-# once: the PCI-alias auto-load path blocked by the blacklist just
-# above would otherwise have loaded nvidia-drm as a plain dependency of
-# `nvidia`, with no parameters at all -- exactly the "loads but does no
-# modesetting" multi-monitor console regression a few sections up in
-# this same hook. A persistent options file applies no matter *how*
-# nvidia-drm ends up loaded, so any *other* unanticipated auto-load path
-# (now or in some future Debian/NVIDIA packaging change) still gets the
-# correct params automatically, rather than silently repeating that same
-# bug through a path nobody thought to block explicitly. Also the
-# standard, generic recommendation for any Wayland compositor on NVIDIA
-# per the Debian wiki (https://wiki.debian.org/NvidiaGraphicsDrivers),
-# independent confirmation this isn't a Hyprland-specific guess.
+# Persistent modeset=1, as a belt-and-suspenders second layer on top of
+# vpinos-gpu-driver.sh's own explicit `modprobe nvidia-drm modeset=1`
+# call. This file matters because this exact class of bug already
+# happened once: the PCI-alias auto-load path blocked by the blacklist
+# just above would otherwise have loaded nvidia-drm as a plain
+# dependency of `nvidia`, with no parameters at all -- exactly the
+# "loads but does no modesetting" multi-monitor console regression a
+# few sections up in this same hook. A persistent options file applies
+# no matter *how* nvidia-drm ends up loaded, so any *other*
+# unanticipated auto-load path (now or in some future Debian/NVIDIA
+# packaging change) still gets the correct param automatically, rather
+# than silently repeating that same bug through a path nobody thought
+# to block explicitly.
+#
+# fbdev=1 REMOVED -- was here too, same belt-and-suspenders reasoning,
+# alongside modeset=1. Real regression, confirmed directly on real
+# hardware (a GTX 1650): corrupted/garbled console output once active,
+# and a real SSH session hang attempting `rmmod nvidia_drm` afterward.
+# Consistent with its own `(EXPERIMENTAL)` label (confirmed via this
+# exact module's own parameter description), not mature behavior. It
+# was never actually fixing the symptom it was added for in the first
+# place -- see vpinos-gpu-driver.sh's own updated comment on its
+# `modprobe nvidia-drm modeset=1` call for the real root cause and fix
+# (`vpinos-gpu-driver.sh`'s `unbind_fbcon()` running unconditionally on
+# every launch, present in every gpu-driver mode, not nvidia-specific).
 cat > /etc/modprobe.d/nvidia-wayland.conf << 'EOF'
 options nvidia-drm modeset=1
-options nvidia-drm fbdev=1
 EOF
 
 update-initramfs -u -k all

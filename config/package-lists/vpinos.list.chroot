@@ -1,7 +1,29 @@
 # base
 systemd-sysv
 #if ARCHITECTURES amd64
-linux-image-amd64
+# Pinned to this exact ABI version, not the generic `linux-image-amd64`
+# metapackage, after a real build failure against the LIVE
+# trixie-backports mirror: the metapackage resolved to
+# 7.1.13-1~bpo13+1, but at that moment its own
+# `linux-base-7.1.13+deb13-amd64` dependency had been temporarily
+# garbage-collected from the archive mid a kernel signing-pipeline
+# transition (see config/archives/vpinos-backports.list's own comment
+# for the full story -- that file is what actually fixes this, by
+# pinning to a frozen pre-transition snapshot; this exact version
+# number must match what that snapshot actually has). 7.1.13 is the
+# same version every build before this one already used successfully,
+# and already satisfies the RX 9060 XT's 6.14+ kernel requirement --
+# this was never about needing something newer, only about no longer
+# depending on a live mirror that can be caught mid-transition. Known
+# trade-off, same category as the nvidia driver's own sid pin: this
+# breaks the self-tracking "always follow whatever's current in
+# backports" design vpinos-backports.pref otherwise relies on -- bumping
+# to a newer kernel later means updating this line AND the snapshot
+# timestamp in vpinos-backports.list together, and reverifying both
+# are actually complete first (see that file's own hard-won
+# verification method -- checking for a real `Candidate:` line, not
+# just the absence of an explicit "unavailable" marker).
+linux-image-7.1.13+deb13-amd64
 #endif
 #if ARCHITECTURES arm64
 linux-image-arm64

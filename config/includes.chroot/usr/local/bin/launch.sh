@@ -231,6 +231,87 @@ if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
     export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 fi
 
+# Multi-GPU exclusion of an unused Intel iGPU -- a real report,
+# confirmed directly over a live SSH session (not guessed, not
+# reproduced via any rebuild): a real cabinet PC with an Intel iGPU
+# (CPU/motherboard, driver i915, nothing physically connected to it --
+# confirmed via `lspci -k`) alongside a discrete GPU (the one actually
+# driving every monitor) hung/black-screened identically across every
+# client and every gpu-driver mode (nouveau AND nvidia). Root cause
+# confirmed via a direct SSH-launched vpinball run: BGFX fatally failed
+# to initialize while printing "MESA-INTEL: ... Ivy Bridge Vulkan
+# support is incomplete" immediately before the fatal error -- Intel's
+# own Vulkan driver, not the discrete GPU's, despite nothing being
+# connected to that GPU at all. This reframes the entire "nvidia black
+# screen" investigation above and in notes/nvidia-proprietary.md: the
+# actual root cause was never nvidia-driver-specific -- it reproduced
+# identically under plain nouveau too. None of this file's own
+# nvidia-only env vars above could ever have fixed it.
+#
+# Two separate things needed fixing, confirmed by testing each in
+# isolation over that same live SSH session before combining them:
+#   1. AQ_DRM_DEVICES (Hyprland's own Aquamarine backend env var,
+#      confirmed as a real key via `strings` on the shipped
+#      libaquamarine.so) -- controls which GPU(s) HYPRLAND ITSELF uses
+#      for compositing/KMS. Confirmed fixed in isolation first: a
+#      plain `foot` terminal (a simple Wayland client) rendered
+#      correctly once this alone was set, proving Hyprland had been
+#      choosing the Intel iGPU as its primary GPU.
+#   2. VK_ICD_FILENAMES (the Vulkan LOADER's own standard env var, not
+#      Hyprland-specific) -- controls which Vulkan ICDs a CLIENT's own
+#      direct `vkEnumeratePhysicalDevices()` call can even see.
+#      AQ_DRM_DEVICES alone did NOT fix vpinball, confirmed directly
+#      (foot worked, vpinball still failed with only AQ_DRM_DEVICES
+#      set) -- because vpinball (BGFX) does its own independent Vulkan
+#      device enumeration, completely bypassing whatever GPU Hyprland
+#      itself composites on. Restricting the loader to only the
+#      correct ICD stops it from ever seeing Intel's own
+#      (`intel_icd.json`/`intel_hasvk_icd.json`) at all. Confirmed
+#      fixed with both set together: vpinball actually launched and
+#      rendered a real table.
+#
+# Detected dynamically by real PCI vendor ID (confirmed via the PCI ID
+# database: 0x8086 = Intel, 0x10de = NVIDIA, 0x1002 = AMD) rather than
+# hardcoded card numbers or assumed PCI enumeration order -- neither is
+# guaranteed stable across boots or hardware. Only acts when BOTH an
+# Intel GPU AND some other (non-Intel) GPU are present -- a genuine
+# hybrid machine like this one -- and does nothing at all on a plain
+# single-GPU machine, this project's own main dev hardware (an AMD RX
+# 9060 XT with no separate Intel iGPU enabled) included, where
+# Hyprland/Vulkan's own single-device defaults are already correct and
+# shouldn't be second-guessed.
+intel_card=""
+other_card=""
+other_vendor=""
+for card in /sys/class/drm/card[0-9]*; do
+    [ -e "$card/device/vendor" ] || continue
+    vendor=$(cat "$card/device/vendor" 2>/dev/null)
+    case "$vendor" in
+        0x8086) intel_card="/dev/dri/$(basename "$card")" ;;
+        *) other_card="/dev/dri/$(basename "$card")"; other_vendor="$vendor" ;;
+    esac
+done
+if [ -n "$intel_card" ] && [ -n "$other_card" ]; then
+    export AQ_DRM_DEVICES="$other_card"
+    case "$other_vendor" in
+        # NVIDIA: which Vulkan ICD is actually correct depends on
+        # gpu-driver mode, same split as this file's own nvidia-only
+        # env var block above.
+        0x10de)
+            if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
+                export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+            else
+                export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nouveau_icd.json
+            fi
+            ;;
+        # AMD: this project has no proprietary-driver toggle for AMD,
+        # so RADV is always the right (only) choice.
+        0x1002)
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+            ;;
+    esac
+fi
+
 # --i-am-really-stupid: Hyprland refuses to run as root without this
 # (confirmed in `man hyprland` -- "Omits root user privileges check").
 # Weston never had this restriction, so it's a new wrinkle this
