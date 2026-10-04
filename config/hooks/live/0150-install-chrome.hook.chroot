@@ -49,23 +49,38 @@ rm -rf "$workdir"
 # reason specific to this image, --no-sandbox is the first thing to
 # try reverting.
 #
-# --use-gl=swiftshader --enable-unsafe-swiftshader: with the
-# Ozone/sandbox issues fixed, Chrome ran with real, healthy-looking
-# processes (confirmed via `ps`) and zero error output, but rendered
-# pure black indefinitely -- not a crash, just never painting a frame.
-# First tried --disable-gpu (the more commonly-suggested flag for
-# GPU-less VMs), which didn't fix it either. The actual issue: Chrome's
-# GPU process, even with hardware acceleration unavailable (VirtualBox's
-# virtual GPU doesn't support real Vulkan/GL, already established), still
-# needs an explicit, *working* GL backend to ever paint anything --
-# `--disable-gpu` tries to eliminate the GPU process entirely, which is a
-# different, likely counterproductive approach here. `--use-gl=swiftshader`
-# keeps the GPU process but forces it onto Chrome's own software GL
-# implementation (SwiftShader); `--enable-unsafe-swiftshader` is required
-# alongside it on current Chrome, which gates SwiftShader behind explicit
-# opt-in for security reasons. Worth revisiting once testing moves to
-# real cabinet hardware with a real GPU, where forcing software
-# rendering may cost performance for no reason.
+# --use-gl=swiftshader --enable-unsafe-swiftshader -- REMOVED, this
+# image's own note on itself turned out to be exactly right ("worth
+# revisiting once testing moves to real cabinet hardware with a real
+# GPU, where forcing software rendering may cost performance for no
+# reason"). Originally added back when this project was only tested
+# inside VirtualBox with no real GPU at all: with the Ozone/sandbox
+# issues fixed, Chrome ran with real, healthy-looking processes
+# (confirmed via `ps`) and zero error output, but rendered pure black
+# indefinitely -- not a crash, just never painting a frame. First tried
+# --disable-gpu (the more commonly-suggested flag for GPU-less VMs),
+# which didn't fix it either. The actual issue at the time: Chrome's GPU
+# process, even with hardware acceleration unavailable (VirtualBox's
+# virtual GPU doesn't support real Vulkan/GL), still needs an explicit,
+# *working* GL backend to ever paint anything -- `--use-gl=swiftshader`
+# kept the GPU process but forced it onto Chrome's own software GL
+# implementation (SwiftShader) instead.
+#
+# Real regression on real hardware, confirmed directly: visible
+# screen-tearing in every vpinfe window (vpinball, rendering natively
+# via BGFX/Vulkan on the real GPU, has none) -- vpinfe's own Chrome
+# launch flags (confirmed by reading vpinfe's actual source,
+# frontend/chromium_manager.py) set nothing that disables vsync or
+# avoids GPU acceleration (`--ignore-gpu-blocklist` if anything signals
+# the opposite intent), so this wrapper forcing every single Chrome
+# window onto CPU software rendering, unconditionally, regardless of
+# whether a real GPU is present and already working, was the likely
+# cause -- SwiftShader-rendered frames don't get the same hardware
+# page-flip-synced presentation real GPU rendering gets. Now that real
+# GPU hardware is confirmed working on multiple real machines (an AMD
+# RX 9060 XT, and an NVIDIA GTX 1650 via both nouveau and the
+# proprietary driver -- see notes/nvidia-proprietary.md), there's no
+# remaining reason to force software rendering at all.
 # $real_chrome_wrapper (what /usr/bin/google-chrome resolves to,
 # /opt/google/chrome/google-chrome) is ITSELF a bash wrapper script
 # Google ships, not the compiled binary -- confirmed directly via
@@ -89,7 +104,7 @@ wrapper_path=/opt/vpinball/google-chrome-wrapper.sh
 mkdir -p /opt/vpinball
 cat > "$wrapper_path" << WRAPPER
 #!/bin/sh
-exec "$real_chrome" --ozone-platform=wayland --use-gl=swiftshader --enable-unsafe-swiftshader "\$@"
+exec "$real_chrome" --ozone-platform=wayland "\$@"
 WRAPPER
 chmod +x "$wrapper_path"
 
