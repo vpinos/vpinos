@@ -64,8 +64,18 @@ jobs:
           # config/archives/vpinos-backports.list instead, pinned to a
           # frozen snapshot.debian.org timestamp after the live mirror's
           # kernel packaging proved actively unreliable (see that file's
-          # own comment). Must stay in sync with notes/vpinos.md step 2
-          # and the build-vpinos-iso skill -- if one changes, change all.
+          # own comment). config/archives/vpinos-backports.pref pins by
+          # `origin snapshot.debian.org`, not just by release/suite name,
+          # specifically so live-build's own default kernel request
+          # (unversioned, unrelated to this project's explicit
+          # linux-image-7.1.13+deb13-amd64 pin in vpinos.list.chroot)
+          # can't tie on priority with the live deb.debian.org mirror and
+          # resolve to whatever kernel that live mirror happens to be on
+          # -- a real reproduced build failure, not a hypothetical. See
+          # notes/vpinos.md step 2 for the full story.
+          #
+          # Must stay in sync with notes/vpinos.md step 2 and the
+          # build-vpinos-iso skill -- if one changes, change all.
 
       # Only the directories lb config generates -- never the whole
       # project: chown -R over cache/ corrupts the bootstrap tree

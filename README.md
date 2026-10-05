@@ -283,8 +283,14 @@ docker run --rm --ulimit nofile=65536:65536 -v "$PWD:/work" -w /work vpinos-buil
     --architectures amd64 \
     --binary-images iso-hybrid \
     --archive-areas "main contrib non-free non-free-firmware" \
-    --backports true \
     --bootappend-live "boot=live components username=vpinos"
+
+# NOT --backports true -- trixie-backports comes from
+# config/archives/vpinos-backports.list instead, pinned to a frozen
+# snapshot.debian.org timestamp (the live mirror's kernel packaging
+# proved unreliable). See notes/vpinos.md step 2 for the full story,
+# including why config/archives/vpinos-backports.pref pins by
+# `origin snapshot.debian.org`, not just by release/suite name.
 
 # Fix ownership of the generated config only -- never `chown -R` the whole
 # project: it corrupts cache/bootstrap and the built image ends up with its

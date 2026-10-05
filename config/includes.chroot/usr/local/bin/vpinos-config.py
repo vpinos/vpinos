@@ -597,11 +597,23 @@ def run_gui(monitors):
     # widths, so the header drifted out of alignment with the cards
     # below it. A single shared grid with fixed column minsizes is what
     # actually keeps them lined up regardless of content width.
+    # Column minsizes + outer padx were previously 460/190/300 and 60,
+    # summing to 1070px (950 of columns + 120 of padx) -- confirmed by
+    # direct Tk geometry measurement (winfo_reqwidth()) that this is the
+    # actual requested width regardless of content, since content alone
+    # only needs ~325px and the columns just pad out to their minsize
+    # floors. On an exactly-1080-wide screen that leaves only 10px of
+    # slack before the scrollbar (15px, see the Canvas/Scrollbar setup
+    # above) even arrives, so the ROLE column (rightmost, column 2) was
+    # the first thing clipped off the right edge with no way to scroll
+    # to it -- confirmed as a real 1080-wide-cabinet report. These
+    # smaller values keep over 250px of slack at 1080 wide while still
+    # being generous relative to what the content actually needs.
     content = tk.Frame(root_, bg=BG)
-    content.pack(padx=60)
-    content.grid_columnconfigure(0, minsize=460, weight=1)
-    content.grid_columnconfigure(1, minsize=190)
-    content.grid_columnconfigure(2, minsize=300)
+    content.pack(padx=24)
+    content.grid_columnconfigure(0, minsize=380, weight=1)
+    content.grid_columnconfigure(1, minsize=140)
+    content.grid_columnconfigure(2, minsize=220)
 
     ttk.Label(content, text="MONITOR", style="Sub.TLabel").grid(
         row=0, column=0, sticky="w", padx=(18, 0), pady=(0, 8)
@@ -645,7 +657,9 @@ def run_gui(monitors):
             name_row, text=f"  (ID {mon['id']})", bg=CARD_BG, fg=MUTED, font=("sans", 12)
         ).pack(side="left")
         sub = f"{mon.get('description', '')}   |   {geometry_of(mon)}"
-        tk.Label(info, text=sub, bg=CARD_BG, fg=MUTED, font=("sans", 11)).pack(anchor="w", pady=(2, 0))
+        tk.Label(
+            info, text=sub, bg=CARD_BG, fg=MUTED, font=("sans", 11), wraplength=340, justify="left"
+        ).pack(anchor="w", pady=(2, 0))
 
         show_cell = tk.Frame(content, **cell_kwargs)
         show_cell.grid(row=r, column=1, sticky="nsew", pady=4)
