@@ -13,14 +13,29 @@ set -e
 # rest of this hook architecture-generic.
 [ "$(dpkg --print-architecture)" = "amd64" ] || exit 0
 
-# Precompiles the NVIDIA proprietary driver's kernel module
-# (nvidia-kernel-dkms, the actual DKMS source package `nvidia-driver`
-# depends on -- confirmed via packages.debian.org, trixie's
-# non-free-firmware component, already enabled by this image's
-# --archive-areas) against whatever kernel is already installed in
-# this chroot by this point (linux-image-7.1.13+deb13-amd64, from the
-# main package list, installed well before any hook runs). DKMS just
-# builds against whatever kernel headers are present.
+# Precompiles the NVIDIA driver's kernel module against whatever kernel
+# is already installed in this chroot by this point
+# (linux-image-7.1.13+deb13-amd64, from the main package list, installed
+# well before any hook runs). DKMS just builds against whatever kernel
+# headers are present.
+#
+# nvidia-kernel-OPEN-dkms, not the closed nvidia-kernel-dkms -- confirmed
+# directly via `apt-cache show nvidia-driver` against NVIDIA's own repo
+# (not Debian's) that as of this driver branch (615.71.09),
+# `nvidia-driver` hard-depends on nvidia-kernel-open-dkms with no closed
+# alternative in that dependency chain at all. Checked whether pinning
+# to an older branch to get the genuine closed module back was worth it
+# (610.57.04-1 still has it, with a real `Conflicts:
+# nvidia-kernel-open-dkms`) -- decided against: this project's own test
+# hardware (a GTX 1650, Turing/TU117) is fully covered by the open
+# kernel module (NVIDIA's open modules support Turing and newer
+# completely), and the whole point of this repo switch was to actually
+# get NVIDIA's latest driver code, not the newest one that still happens
+# to ship the legacy module. Real trade-off, accepted deliberately, not
+# overlooked: pre-Turing cards (Maxwell/Pascal, GTX 10-series and
+# earlier) aren't supported by the open kernel module at all, narrowing
+# this project's "works on whatever GPU a cabinet builder has" goal for
+# that hardware range specifically.
 #
 # linux-headers-7.1.13+deb13-amd64 below, NOT the generic
 # linux-headers-amd64 metapackage -- must match whatever
@@ -35,19 +50,36 @@ set -e
 # vpinos.list.chroot's pinned version changes, this must change to
 # match.
 #
-# Pulls nvidia-graphics-drivers from sid specifically (see
-# config/archives/vpinos-sid.list/.pref) -- confirmed via a real failed
-# build that neither trixie's (550.163.01-2) nor trixie-backports'
-# (550.163.01-4~bpo13+1) nvidia-kernel-dkms compiles against this
-# image's 7.1.13 kernel (a kernel VMA-locking refactor broke the
-# build: `VMA_LOCK_OFFSET`/`__is_vma_write_locked` no longer match).
-# Only sid's 550.163.01-5.1 has the fix, confirmed directly in its
-# real changelog. Nothing below needs to reference sid explicitly --
-# the pin file alone makes apt resolve nvidia-graphics-drivers'
-# packages from sid automatically, same pattern as the plain `apt-get
-# install hyprland` in the main package list relying on
-# vpinos-backports.pref rather than an explicit `/trixie-backports`
-# suffix.
+# Pulls nvidia-driver/nvidia-kernel-open-dkms from NVIDIA's OWN apt
+# repository, not Debian's -- confirmed directly, not assumed, that
+# Debian's own packaging (trixie, trixie-backports, AND sid) is stuck
+# on 550.163.01 everywhere (`apt-cache madison` against all three live
+# archives showed the identical version in each) -- Debian simply
+# hasn't packaged a newer NVIDIA driver branch at all yet, so staying
+# within Debian's own archives was no longer an option, not just a
+# choice against it. Switched after a real, reproducible multi-monitor
+# bug (3 real displays under "nvidia" mode: only 2 ever get configured,
+# one of the two visibly wrong) that 550.163.01 doesn't fix. NVIDIA's
+# own repo currently serves 615.71.09 -- see
+# config/archives/vpinos-nvidia-repo.pref for the version-pin reasoning
+# and the real trade-offs of this switch (considered and rejected once
+# already for the *kernel* itself, for the same frankendebian-risk
+# reasons -- revisited here deliberately because Debian's own nvidia
+# packaging genuinely has nothing newer, not out of convenience).
+#
+# cuda-keyring is NVIDIA's own, officially-documented way to add this
+# repo + its scoped signing key in one step (confirmed via NVIDIA's own
+# CUDA installation guide) -- same "curl a vendor's own .deb and dpkg -i
+# it directly in a hook" pattern already used for Chrome
+# (0150-install-chrome.hook.chroot), not a new technique for this
+# project. Scoped `signed-by` key (confirmed by reading the installed
+# source list this produces), not a globally-trusted key -- same
+# security posture as every other third-party source in this image.
+workdir=$(mktemp -d)
+curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb" -o "$workdir/cuda-keyring.deb"
+dpkg -i "$workdir/cuda-keyring.deb"
+rm -rf "$workdir"
+apt-get update
 #
 # Opt-in only -- see vpinos-menu.sh's "GPU Driver" option and
 # vpinos-gpu-driver.sh. The open-source Mesa/NVK driver (this image's
@@ -64,7 +96,8 @@ set -e
 # as prebuilt .debs). What's actually kept: the compiled module itself
 # and nvidia-driver's userspace libraries (libnvidia-*, Vulkan/EGL
 # ICDs, nvidia-smi, Xorg driver) -- not the umbrella `nvidia-driver`
-# metapackage, not `nvidia-kernel-dkms`, not `dkms`, not the compiler.
+# metapackage, not `nvidia-kernel-open-dkms`, not `dkms`, not the
+# compiler.
 #
 # Two earlier approaches were tried and failed on a REAL build before
 # landing on this one -- recorded here so neither gets retried:
@@ -85,15 +118,28 @@ set -e
 # The approach that actually works: back up the already-compiled
 # module files, then purge the *whole* DKMS chain in one atomic
 # transaction -- the umbrella `nvidia-driver` metapackage,
-# `nvidia-kernel-dkms` (whose own removal script calls `dkms remove`,
-# which is why the backup happens first), `dkms`, and the compiler --
-# all together, so nothing is ever left depending on something that's
-# gone. Then restore the backed-up module files directly and
-# regenerate `depmod`'s database so `modprobe nvidia` can find them --
-# modprobe only needs the .ko(.xz) file present under
+# `nvidia-kernel-open-dkms` (whose own removal script calls `dkms
+# remove`, which is why the backup happens first), `dkms`, and the
+# compiler -- all together, so nothing is ever left depending on
+# something that's gone. Then restore the backed-up module files
+# directly and regenerate `depmod`'s database so `modprobe nvidia` can
+# find them -- modprobe only needs the .ko(.xz) file present under
 # /lib/modules/<kver>/ and depmod's module-alias database kept current;
-# neither depends on dkms's own bookkeeping surviving.
-apt-get install -y linux-headers-7.1.13+deb13-amd64 build-essential dkms nvidia-driver
+# neither depends on dkms's own bookkeeping surviving. The open kernel
+# module still produces identically-named .ko files (nvidia.ko,
+# nvidia-drm.ko, nvidia-modeset.ko, nvidia-uvm.ko, ...) as the closed
+# one did -- confirmed directly against this hook's own real build log
+# -- so this backup/restore/depmod mechanism needed no changes at all
+# for the open variant.
+#
+# nvidia-kernel-open-dkms named explicitly below alongside nvidia-driver
+# (rather than left to install only transitively as nvidia-driver's own
+# dependency) -- same "deliberate not implicit" pattern as everywhere
+# else in this project; apt would pull it in either way, but naming it
+# documents that this hook knows exactly which kernel module variant it
+# is building, not just whatever nvidia-driver happens to depend on this
+# week.
+apt-get install -y linux-headers-7.1.13+deb13-amd64 build-essential dkms nvidia-driver nvidia-kernel-open-dkms
 
 kver=$(ls /lib/modules)
 backup_dir=/root/nvidia-module-backup
@@ -121,7 +167,7 @@ apt-mark manual $(dpkg-query -W -f='${Package}\n' | grep -iE 'nvidia|cuda')
 # script) until this hook's build step is effectively redone, i.e. the
 # ISO is rebuilt. Not solved here -- flagging it rather than silently
 # shipping a driver that can go stale after an unrelated kernel update.
-apt-get purge -y nvidia-driver nvidia-kernel-dkms dkms build-essential linux-headers-7.1.13+deb13-amd64
+apt-get purge -y nvidia-driver nvidia-kernel-open-dkms dkms build-essential linux-headers-7.1.13+deb13-amd64
 apt-get autoremove -y
 
 # `apt-get autoremove` alone, even run twice, does NOT fully sweep this
