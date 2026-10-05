@@ -15,6 +15,9 @@ chmod 0755 /usr/local/bin/vpinos-gpu-driver.sh
 chmod +x /usr/local/bin/vpinos-menu.sh
 ln -sf /usr/local/bin/vpinos-menu.sh /usr/local/bin/vpinos-menu
 chmod +x /usr/local/bin/vpinos-config.py
+# Same treatment, same reasoning as vpinos-config.py: a debugging tool
+# run directly as `vpinos`, no sudo/privilege boundary involved.
+chmod +x /usr/local/bin/vpinos_sysinfo.py
 # Plain chmod +x, no explicit chown -- same treatment as
 # vpinos-config.py above: runs as `vpinos` directly (via systemd
 # User=vpinos, see vpinos-fetch-tables.service), no sudo/privilege

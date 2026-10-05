@@ -234,6 +234,7 @@ while true; do
     gcur=$(cat /etc/vpinos/gpu-driver 2>/dev/null)
     [ -z "$gcur" ] && gcur=default
     echo "10) GPU Driver: $gcur"
+    echo "11) System Info (Debug)"
     echo "q) Quit to shell"
     echo "s) Shutdown"
     echo "=============================="
@@ -312,6 +313,16 @@ while true; do
             ;;
         10)
             gpu_driver_submenu
+            ;;
+        11)
+            # Same "shell" client pattern as option 1 (vpinos-config.py):
+            # a Tk GUI that manages its own fullscreen presentation, so it
+            # runs fine under the plain kiosk Hyprland config -- no
+            # windowed-config special case needed (see launch.sh's
+            # hypr_config selection).
+            echo "$(date -Is): menu: selected option 11 (system info)" >>/var/log/vpinos-menu.log
+            /usr/local/bin/launch.sh sysinfo /usr/local/bin/vpinos_sysinfo.py
+            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
             ;;
         q|Q)
             break
