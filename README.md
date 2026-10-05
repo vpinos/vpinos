@@ -187,6 +187,31 @@ Prebuilt ISOs are published on the
 - A network connection is needed to update, and for the sample tables
   below on first boot, but not otherwise to run.
 
+### NVIDIA video card support
+
+Besides the open-source NVK driver above (the default, no install needed),
+VPinOS can also precompile NVIDIA's **proprietary** driver at build time and
+let you switch to it at runtime from the console menu (`vpinos-menu` &rarr;
+"GPU Driver" &rarr; "NVIDIA proprietary"). As of the current image, this is
+NVIDIA's **615.71.09** driver from NVIDIA's own apt repository, built against
+the open-source `nvidia-kernel-open-dkms` kernel module (NVIDIA no longer
+ships the closed kernel module on this driver branch). That open kernel
+module supports Turing and newer GPUs:
+
+| Architecture       | Year | GeForce series                          |
+|--------------------|------|------------------------------------------|
+| Turing             | 2018 | GeForce 16 series, GeForce 20 series     |
+| Ampere              | 2020 | GeForce 30 series                        |
+| Ada Lovelace        | 2022 | GeForce 40 series                        |
+| Blackwell           | 2025 | GeForce 50 series                        |
+
+Older cards (Kepler, Maxwell, Pascal &mdash; e.g. GTX 900/10-series and
+earlier) aren't supported by this proprietary path at all; they fall back to
+the default NVK/nouveau path above. Also note: the proprietary driver has
+**not yet been independently verified by this project on real NVIDIA
+hardware with Hyprland/Wayland** &mdash; see `notes/vpinos.md` and
+`notes/nvidia-proprietary.md` for the ongoing investigation.
+
 ## Sample tables
 
 VPinFE's table list (`~/tables`) starts empty on a fresh boot. A
