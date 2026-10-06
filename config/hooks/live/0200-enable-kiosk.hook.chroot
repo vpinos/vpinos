@@ -28,6 +28,8 @@ systemctl enable seatd.service
 systemctl enable NetworkManager.service
 systemctl enable vpinos-hosts.service
 systemctl enable vpinos-fetch-tables.service
+# TEMPORARY -- see vpinos-exampletable-workaround.service's own comment.
+systemctl enable vpinos-exampletable-workaround.service
 
 # includes.chroot doesn't reliably give files the right ownership/mode:
 # mode comes through as-is from the (unprivileged) build host, and
