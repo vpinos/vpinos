@@ -52,6 +52,15 @@ MENU_WORKSPACE = 890
 HYPRLAND_CONF = "/etc/vpinos/hyprland.conf"
 BEGIN_MARKER = "# BEGIN vpinos-workspace-monitors"
 END_MARKER = "# END vpinos-workspace-monitors"
+# A second, separate marker block (explicit `monitor = ...` mode lines),
+# not folded into the block above -- that one is keyed by *role*
+# (Table/Backglass/DMD) and only ever covers monitors someone assigned a
+# role to; this one is keyed by *every detected output*, assigned or not,
+# so a connected-but-unused monitor still gets a real mode line instead of
+# Hyprland's own `preferred` auto-negotiation (see refresh_rates_for()'s
+# own comment for why that auto-negotiation isn't trustworthy on its own).
+MODE_BEGIN_MARKER = "# BEGIN vpinos-monitor-modes"
+MODE_END_MARKER = "# END vpinos-monitor-modes"
 # Fixed mapping, matches the per-title windowrules already in
 # hyprland.conf (VPinFE Table/vpinball Player -> workspace 1, etc.) --
 # not user-configurable, just which role goes on which workspace.
@@ -271,20 +280,119 @@ def parse_existing_roles():
     return result
 
 
-def save_workspace_lines(lines):
+def save_marker_block(begin_marker, end_marker, lines):
     with open(HYPRLAND_CONF) as f:
         content = f.read()
-    start = content.find(BEGIN_MARKER)
-    end = content.find(END_MARKER)
+    start = content.find(begin_marker)
+    end = content.find(end_marker)
     if start == -1 or end == -1 or end < start:
         raise RuntimeError(
-            f"couldn't find the {BEGIN_MARKER} / {END_MARKER} markers in {HYPRLAND_CONF}"
+            f"couldn't find the {begin_marker} / {end_marker} markers in {HYPRLAND_CONF}"
         )
-    start_of_body = start + len(BEGIN_MARKER)
+    start_of_body = start + len(begin_marker)
     body = "\n" + ("\n".join(lines) + "\n" if lines else "")
     new_content = content[:start_of_body] + body + content[end:]
     with open(HYPRLAND_CONF, "w") as f:
         f.write(new_content)
+
+
+def save_workspace_lines(lines):
+    save_marker_block(BEGIN_MARKER, END_MARKER, lines)
+
+
+# ---- monitor modes (resolution/refresh rate) --------------------------------
+def refresh_rates_for(mon):
+    # Hyprland's own `availableModes` (confirmed present in this exact
+    # shipped build via `strings` on /usr/bin/Hyprland: the JSON field and
+    # its "{}x{}@{:.2f}Hz" format string are both in the binary) lists
+    # every mode the display's EDID actually advertises -- not just
+    # whichever one Hyprland picked as current. Only the rates available
+    # at the CURRENT resolution are offered here; this tool doesn't let
+    # you change resolution, only which refresh rate to run it at.
+    width, height = mon.get("width"), mon.get("height")
+    rates = []
+    pattern = re.compile(rf"^{width}x{height}@([\d.]+)Hz$")
+    for mode in mon.get("availableModes", []) or []:
+        m = pattern.match(mode)
+        if m:
+            rate = round(float(m[1]), 2)
+            if rate not in rates:
+                rates.append(rate)
+    if not rates:
+        # No availableModes data (older Hyprland, or a virtual/headless
+        # output) -- fall back to just the single rate Hyprland reports
+        # as current, so there's always at least one option to show.
+        rates = [round(mon.get("refreshRate", 60.0), 2)]
+    rates.sort(reverse=True)
+    return rates
+
+
+def current_rate_of(mon):
+    # `refreshRate` (the currently active mode) is reported to 5 decimal
+    # places, availableModes entries to 2 -- round both the same way
+    # before comparing, or an exact string/float match would never hit.
+    return round(mon.get("refreshRate", 60.0), 2)
+
+
+def parse_existing_modes():
+    # Same idea as parse_existing_roles(): pre-fill each monitor's
+    # refresh-rate choice from whatever's already saved, so reopening
+    # this tool doesn't reset a prior choice back to "whatever's current".
+    try:
+        with open(HYPRLAND_CONF) as f:
+            content = f.read()
+    except OSError:
+        return {}
+    start = content.find(MODE_BEGIN_MARKER)
+    end = content.find(MODE_END_MARKER)
+    if start == -1 or end == -1 or end < start:
+        return {}
+    body = content[start + len(MODE_BEGIN_MARKER) : end]
+    result = {}
+    for line in body.splitlines():
+        m = re.match(r"\s*monitor\s*=\s*([^\s,]+)\s*,\s*\d+x\d+@([\d.]+)\s*,", line)
+        if m:
+            result[m.group(1)] = round(float(m.group(2)), 2)
+    return result
+
+
+def build_monitor_mode_lines(monitors, chosen_rates):
+    # One line per *detected* monitor, not just role-assigned ones (see
+    # MODE_BEGIN_MARKER's own comment for why) -- resolution@refresh is
+    # the only thing this tool actually lets you choose; scale is carried
+    # straight over from Hyprland's own live value (see below for why
+    # that specifically, not a hardcoded 1); position is "auto", not a
+    # frozen x/y snapshot (see below for why).
+    #
+    # Position: `"auto"` (confirmed a real, valid literal via `strings`
+    # on this exact shipped Hyprland binary: "position = \"auto\"", plus
+    # the auto-up/auto-down/auto-left/auto-right/auto-center-* variants),
+    # not each monitor's current `x`/`y` echoed back as a literal number.
+    # Tried the literal-echo approach first and hit a real, reproduced
+    # failure: "Your monitor layout is set up incorrectly. Monitor {name}
+    # overlaps with other monitor(s) in the layout." (confirmed this
+    # exact message lives in Hyprland's own CCompositor::
+    # checkMonitorOverlaps()). Root cause: a monitor's logical position
+    # is a DERIVED quantity -- a function of every monitor's scale
+    # together, not independent per-monitor data -- and Hyprland's own
+    # auto-arrangement is what guarantees those derived positions never
+    # overlap. Freezing a snapshot of it as a literal number throws that
+    # guarantee away; "auto" keeps it, while still locking in the
+    # resolution/refresh rate and scale this tool actually cares about.
+    #
+    # Scale: `mon["scale"]`, NOT a hardcoded 1 -- confirmed as a real bug
+    # in an earlier version, not a guess: Hyprland's `x`/`y` (now unused
+    # above, but this still matters for the monitor's own logical
+    # footprint) are reported in LOGICAL (post-scale) coordinates, so a
+    # monitor auto-scaled by Hyprland itself (e.g. a 4K output at 2x)
+    # would get a different logical footprint than it actually has if
+    # this were forced to 1 instead of echoing the real value back.
+    lines = []
+    for mon in monitors:
+        rate = chosen_rates.get(mon["name"], current_rate_of(mon))
+        scale = mon.get("scale", 1) or 1
+        lines.append(f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, {scale:g}")
+    return lines
 
 
 def ensure_vpinballx_ini():
@@ -493,6 +601,7 @@ def run_gui(monitors):
     menu_monitor = ordered[0]["name"]
     switch_to(menu_monitor, MENU_WORKSPACE)
     existing_roles = parse_existing_roles()
+    existing_rates = parse_existing_modes()
 
     root = tk.Tk()
     root.title("VPinOS -- Configuration")
@@ -501,13 +610,19 @@ def run_gui(monitors):
 
     style = ttk.Style(root)
     style.theme_use("clam")
-    style.configure("TLabel", background=BG, foreground=TEXT, font=("sans", 14))
-    style.configure("Header.TLabel", background=BG, foreground=TEXT, font=("sans", 24, "bold"))
-    style.configure("Sub.TLabel", background=BG, foreground=MUTED, font=("sans", 12))
-    style.configure("Section.TLabel", background=BG, foreground=TEXT, font=("sans", 15, "bold"))
-    style.configure("Card.TLabel", background=CARD_BG, foreground=TEXT, font=("sans", 14))
+    style.configure("TLabel", background=BG, foreground=TEXT, font=("sans", 13))
+    style.configure("Header.TLabel", background=BG, foreground=TEXT, font=("sans", 22, "bold"))
+    style.configure("Sub.TLabel", background=BG, foreground=MUTED, font=("sans", 11))
+    style.configure("Section.TLabel", background=BG, foreground=TEXT, font=("sans", 14, "bold"))
+    style.configure("Card.TLabel", background=CARD_BG, foreground=TEXT, font=("sans", 13))
 
-    style.configure("TButton", font=("sans", 14, "bold"), padding=(16, 10), relief="flat", borderwidth=0)
+    # Smaller font + tighter padding than before -- confirmed the whole
+    # table's natural width mattered directly: this tool opens fullscreen
+    # on whichever monitor it switches to first, which isn't always the
+    # widest one in a multi-monitor cabinet (see the horizontal-scrollbar
+    # comment below for the real report), so less width needed per
+    # widget means less reliance on that scrollbar in the first place.
+    style.configure("TButton", font=("sans", 12, "bold"), padding=(12, 8), relief="flat", borderwidth=0)
     style.configure("Show.TButton", background=ACCENT, foreground="white")
     style.map(
         "Show.TButton",
@@ -519,19 +634,19 @@ def run_gui(monitors):
     style.configure("Quit.TButton", background=NEUTRAL, foreground=TEXT, padding=(24, 12))
     style.map("Quit.TButton", background=[("active", NEUTRAL_HOVER)])
 
-    style.configure("TRadiobutton", background=CARD_BG, foreground=TEXT, font=("sans", 13))
+    style.configure("TRadiobutton", background=CARD_BG, foreground=TEXT, font=("sans", 11))
     style.map(
         "TRadiobutton",
         background=[("active", CARD_BG)],
         indicatorcolor=[("selected", ACCENT), ("!selected", BORDER)],
     )
-    style.configure("Mode.TRadiobutton", background=BG, foreground=TEXT, font=("sans", 13))
+    style.configure("Mode.TRadiobutton", background=BG, foreground=TEXT, font=("sans", 11))
     style.map(
         "Mode.TRadiobutton",
         background=[("active", BG)],
         indicatorcolor=[("selected", ACCENT), ("!selected", BORDER)],
     )
-    style.configure("TCheckbutton", background=CARD_BG, foreground=TEXT, font=("sans", 13))
+    style.configure("TCheckbutton", background=CARD_BG, foreground=TEXT, font=("sans", 11))
     style.map(
         "TCheckbutton",
         background=[("active", CARD_BG)],
@@ -550,8 +665,23 @@ def run_gui(monitors):
     outer.pack(fill="both", expand=True)
     canvas = tk.Canvas(outer, bg=BG, highlightthickness=0)
     scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=scrollbar.set)
+    # Horizontal scrollbar too, not just vertical -- confirmed directly,
+    # a real reason this matters now: this tool opens fullscreen on
+    # whichever monitor it switches to first (the lowest-id one, see
+    # menu_monitor below), and that is not necessarily the widest
+    # display in a multi-monitor cabinet. A real report: on a setup
+    # where that monitor's LOGICAL size (Hyprland scale accounted for)
+    # was only 960px wide, the REFRESH RATE column -- the rightmost of
+    # four -- was clipped off entirely with no way to reach it, because
+    # this body previously only ever scrolled vertically. Column widths
+    # below are tuned to comfortably fit a 960-wide screen with real
+    # margin (see that section's own comment for the exact numbers),
+    # but this scrollbar is the actual guarantee: whatever's too wide
+    # for *any* future monitor is still reachable, not silently gone.
+    h_scrollbar = ttk.Scrollbar(outer, orient="horizontal", command=canvas.xview)
+    canvas.configure(yscrollcommand=scrollbar.set, xscrollcommand=h_scrollbar.set)
     scrollbar.pack(side="right", fill="y")
+    h_scrollbar.pack(side="bottom", fill="x")
     canvas.pack(side="left", fill="both", expand=True)
 
     scroll_frame = tk.Frame(canvas, bg=BG)
@@ -561,9 +691,15 @@ def run_gui(monitors):
         canvas.configure(scrollregion=canvas.bbox("all"))
 
     def _on_canvas_configure(event):
-        # Keeps scroll_frame's contents centered and as wide as the
-        # canvas itself, rather than a fixed/guessed width.
-        canvas.itemconfig(scroll_window, width=event.width)
+        # Widened to the canvas's own width when content fits (the
+        # normal case -- keeps everything centered and filling the
+        # screen, same as before), but never SHRUNK below what the
+        # content actually needs -- that's what used to silently clip
+        # the rightmost column instead of letting the horizontal
+        # scrollbar above reach it.
+        needed = scroll_frame.winfo_reqwidth()
+        canvas.itemconfig(scroll_window, width=max(event.width, needed))
+        canvas.configure(scrollregion=canvas.bbox("all"))
 
     scroll_frame.bind("<Configure>", _on_scroll_frame_configure)
     canvas.bind("<Configure>", _on_canvas_configure)
@@ -610,10 +746,31 @@ def run_gui(monitors):
     # smaller values keep over 250px of slack at 1080 wide while still
     # being generous relative to what the content actually needs.
     content = tk.Frame(root_, bg=BG)
-    content.pack(padx=24)
-    content.grid_columnconfigure(0, minsize=380, weight=1)
-    content.grid_columnconfigure(1, minsize=140)
-    content.grid_columnconfigure(2, minsize=220)
+    # Column widths tuned to fit a real, confirmed 960-logical-pixel-wide
+    # screen with actual margin (not just the earlier 1080-wide target --
+    # this tool opens fullscreen on whichever monitor it switches to
+    # first, which on a real multi-monitor cabinet can be the SMALLEST
+    # one once Hyprland's per-output scale is accounted for; see the
+    # horizontal-scrollbar comment above for the real report that
+    # confirmed this). The horizontal scrollbar is the actual guarantee
+    # against clipping; these numbers are about not needing it normally.
+    # `weight=` on all four, in the same ratio as their minsize, not just
+    # column 0 -- on a screen wider than the 780px this naturally needs
+    # (a typical 1080p/4K main display, not the narrow menu-monitor case
+    # above), any extra space used to go entirely to column 0, leaving
+    # IDENTIFY/ROLE/REFRESH RATE pinned at their minimum and the whole
+    # table looking lopsided instead of filling the screen. Weighted
+    # proportionally, all four grow together instead.
+    # Re-measured after shrinking the table's fonts (see the style setup
+    # above) -- natural total dropped from ~780px to ~660px, verified
+    # directly against the real HDMI-A-2/DP-2 data that originally
+    # reproduced this: 684px total vs. the confirmed 960px target, a
+    # 276px margin (up from 156px at the old, larger font sizes).
+    content.pack(padx=12, fill="x")
+    content.grid_columnconfigure(0, minsize=280, weight=28)
+    content.grid_columnconfigure(1, minsize=90, weight=9)
+    content.grid_columnconfigure(2, minsize=170, weight=17)
+    content.grid_columnconfigure(3, minsize=120, weight=12)
 
     ttk.Label(content, text="MONITOR", style="Sub.TLabel").grid(
         row=0, column=0, sticky="w", padx=(18, 0), pady=(0, 8)
@@ -624,9 +781,13 @@ def run_gui(monitors):
     ttk.Label(content, text="ROLE", style="Sub.TLabel").grid(
         row=0, column=2, sticky="w", padx=(18, 0), pady=(0, 8)
     )
+    ttk.Label(content, text="REFRESH RATE", style="Sub.TLabel").grid(
+        row=0, column=3, sticky="w", padx=(18, 0), pady=(0, 8)
+    )
 
     show_buttons = []
     role_vars = []
+    rate_vars = []
 
     def on_show(mon):
         for b in show_buttons:
@@ -652,13 +813,13 @@ def run_gui(monitors):
         info.pack(anchor="w", padx=18, pady=16)
         name_row = tk.Frame(info, bg=CARD_BG)
         name_row.pack(anchor="w")
-        tk.Label(name_row, text=mon["name"], bg=CARD_BG, fg=TEXT, font=("sans", 17, "bold")).pack(side="left")
+        tk.Label(name_row, text=mon["name"], bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(side="left")
         tk.Label(
-            name_row, text=f"  (ID {mon['id']})", bg=CARD_BG, fg=MUTED, font=("sans", 12)
+            name_row, text=f"  (ID {mon['id']})", bg=CARD_BG, fg=MUTED, font=("sans", 10)
         ).pack(side="left")
         sub = f"{mon.get('description', '')}   |   {geometry_of(mon)}"
         tk.Label(
-            info, text=sub, bg=CARD_BG, fg=MUTED, font=("sans", 11), wraplength=340, justify="left"
+            info, text=sub, bg=CARD_BG, fg=MUTED, font=("sans", 10), wraplength=240, justify="left"
         ).pack(anchor="w", pady=(2, 0))
 
         show_cell = tk.Frame(content, **cell_kwargs)
@@ -687,6 +848,36 @@ def run_gui(monitors):
                 radios, text=role, value=role, variable=role_var, style="TRadiobutton"
             ).grid(row=0, column=col, padx=8)
         role_vars.append((mon, role_var))
+
+        # Same radio-button reasoning as ROLE above (a Combobox's popup
+        # would hit the identical kiosk-fullscreen bug) -- usually just 1-3
+        # options in practice (most displays' EDID lists a small handful
+        # of rates at their native resolution), so a compact radio row
+        # fits the same card layout fine. Defaults to whatever's already
+        # saved in hyprland.conf (existing_rates), falling back to
+        # whatever Hyprland currently has this monitor running at if nothing
+        # was saved yet.
+        rate_cell = tk.Frame(content, **cell_kwargs)
+        rate_cell.grid(row=r, column=3, sticky="nsew", pady=4)
+        available_rates = refresh_rates_for(mon)
+        default_rate = existing_rates.get(mon["name"], current_rate_of(mon))
+        if default_rate not in available_rates:
+            default_rate = available_rates[0]
+        rate_var = tk.DoubleVar(value=default_rate)
+        rate_radios = tk.Frame(rate_cell, bg=CARD_BG)
+        rate_radios.pack(padx=12, pady=16, anchor="w")
+        # Wrapped at 2 per row, not all in one row -- some displays'
+        # EDID lists many legacy rates (23.98/29.97/59.94/119.88 etc.),
+        # and this column's width is what's tight on a 1080-wide screen
+        # (confirmed directly, same class of bug as the earlier
+        # MONITOR/ROLE column-width fix); growing taller instead of
+        # wider is free, the scrollable body already handles that.
+        for i, rate in enumerate(available_rates):
+            row, col = divmod(i, 2)
+            ttk.Radiobutton(
+                rate_radios, text=f"{rate:g}", value=rate, variable=rate_var, style="TRadiobutton"
+            ).grid(row=row, column=col, padx=8, pady=(2, 2), sticky="w")
+        rate_vars.append((mon, rate_var))
 
     # Last option, below the displays -- Desktop/Cabinet mode
     # (VPinballX.ini's `BGSet`), plus which of the assigned roles above
@@ -731,9 +922,9 @@ def run_gui(monitors):
         ).pack(side="left", padx=(18, 12), pady=16, anchor="n")
         text_col = tk.Frame(row, bg=CARD_BG)
         text_col.pack(side="left", padx=(0, 18), pady=16, fill="x", expand=True)
-        tk.Label(text_col, text=name, bg=CARD_BG, fg=TEXT, font=("sans", 15, "bold")).pack(anchor="w")
+        tk.Label(text_col, text=name, bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(anchor="w")
         tk.Label(
-            text_col, text=desc, bg=CARD_BG, fg=MUTED, font=("sans", 11),
+            text_col, text=desc, bg=CARD_BG, fg=MUTED, font=("sans", 10),
             wraplength=DESC_WRAP, justify="left",
         ).pack(anchor="w", pady=(2, 0))
 
@@ -751,16 +942,16 @@ def run_gui(monitors):
         row.pack(fill="x", pady=4)
         text_col = tk.Frame(row, bg=CARD_BG)
         text_col.pack(side="left", padx=18, pady=16, fill="x", expand=True)
-        tk.Label(text_col, text=name, bg=CARD_BG, fg=TEXT, font=("sans", 15, "bold")).pack(anchor="w")
+        tk.Label(text_col, text=name, bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(anchor="w")
         tk.Label(
-            text_col, text=desc, bg=CARD_BG, fg=MUTED, font=("sans", 11),
+            text_col, text=desc, bg=CARD_BG, fg=MUTED, font=("sans", 10),
             wraplength=DESC_WRAP, justify="left",
         ).pack(anchor="w", pady=(2, 0))
         field_var = tk.StringVar(value=parse_existing_screen_field(key))
         entry = tk.Entry(
             row, textvariable=field_var, width=8, bg=BG, fg=TEXT,
             insertbackground=TEXT, relief="flat", highlightthickness=1,
-            highlightbackground=BORDER, highlightcolor=ACCENT, font=("sans", 14),
+            highlightbackground=BORDER, highlightcolor=ACCENT, font=("sans", 13),
         )
         entry.pack(side="left", padx=(0, 18))
         screen_field_vars[key] = field_var
@@ -776,11 +967,11 @@ def run_gui(monitors):
     ).pack(side="left", padx=(18, 12), pady=16, anchor="n")
     fulldmd_text_col = tk.Frame(fulldmd_row, bg=CARD_BG)
     fulldmd_text_col.pack(side="left", padx=(0, 18), pady=16, fill="x", expand=True)
-    tk.Label(fulldmd_text_col, text="Full DMD", bg=CARD_BG, fg=TEXT, font=("sans", 15, "bold")).pack(
+    tk.Label(fulldmd_text_col, text="Full DMD", bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(
         anchor="w"
     )
     tk.Label(
-        fulldmd_text_col, text=FULLDMD_DESCRIPTION, bg=CARD_BG, fg=MUTED, font=("sans", 11),
+        fulldmd_text_col, text=FULLDMD_DESCRIPTION, bg=CARD_BG, fg=MUTED, font=("sans", 10),
         wraplength=DESC_WRAP, justify="left",
     ).pack(anchor="w", pady=(2, 0))
 
@@ -817,6 +1008,22 @@ def run_gui(monitors):
         lines = build_workspace_lines(role_to_monitor)
         try:
             save_workspace_lines(lines)
+        except OSError as exc:
+            status.configure(text=f"ERROR saving hyprland.conf: {exc}", foreground="#f85149")
+            return
+        except RuntimeError as exc:
+            status.configure(text=f"ERROR: {exc}", foreground="#f85149")
+            return
+
+        # Every detected monitor, not just role-assigned ones (see
+        # MODE_BEGIN_MARKER's own comment) -- `ordered` is the full
+        # detected list, `rate_vars` has one entry per monitor in that
+        # same list regardless of whether it got a role.
+        chosen_rates = {mon["name"]: rate_var.get() for mon, rate_var in rate_vars}
+        try:
+            save_marker_block(
+                MODE_BEGIN_MARKER, MODE_END_MARKER, build_monitor_mode_lines(ordered, chosen_rates)
+            )
         except OSError as exc:
             status.configure(text=f"ERROR saving hyprland.conf: {exc}", foreground="#f85149")
             return
