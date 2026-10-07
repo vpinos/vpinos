@@ -27,25 +27,43 @@
 # sets Priority.ScoreView/PUP/B2SLegacyDMD to fixed values, regardless
 # of mode or role assignment.
 #
-# Run as a launch.sh "shell" client, same pattern as the debug terminal
-# (`launch.sh shell /usr/bin/foot`) -- Hyprland needs to already be up
-# with WAYLAND_DISPLAY set, which launch.sh's own launch_client() handles;
-# this script doesn't start Hyprland itself:
-#   /usr/local/bin/launch.sh shell /usr/local/bin/vpinos-config.py
+# The UI is a small local web server (stdlib http.server only, no
+# dependencies) plus a plain HTML/JS/CSS page in ./vpinos-config-web/,
+# opened in `google-chrome --app=...` -- same look/feel as the sibling
+# tool vpxconfig, and for the same reason: Tk was clunky here (no native
+# Wayland backend, needed Xwayland; its Combobox popups got caught by
+# hyprland.conf's kiosk fullscreen windowrule, forcing radio-button
+# workarounds throughout).
 #
-# The menu itself is a real GUI (tkinter, via python3-tk) rather than a
-# terminal menu -- runs over Xwayland (`xwayland { enabled = true }` is
-# already on in hyprland.conf), so DISPLAY has to be discovered and set
-# before any tkinter import touches a display, same idea as launch.sh's
-# own installer-specific DISPLAY handling, just done here instead since
-# launch.sh's generic "shell" client path only sets up Wayland.
+# UNLIKE vpxconfig, this tool genuinely needs Hyprland already running
+# (every hyprctl call below) -- it is NOT a standalone server vpinos-menu.sh
+# starts directly before Hyprland exists. It is launch.sh's CLIENT, same
+# role Chrome plays for vpxconfig and the old Tk GUI played here before
+# this rewrite: launch.sh starts Hyprland, waits for its Wayland socket,
+# then runs this script, which gets its monitor list via hyprctl, starts
+# its own HTTP server, and THEN spawns google-chrome itself (see main())
+# pointed at that server -- Chrome is this script's child, not
+# launch.sh's. Run via vpinos-menu.sh option 1, or directly:
+#   /usr/local/bin/launch.sh vpinos-config /usr/local/bin/vpinos-config.py
+# launch.sh routes client_name "vpinos-config" to the windowed/floating
+# hyprland-installer.conf (same case arm as "vpxconfig"/"installer"),
+# not the kiosk config -- a config tool needs a visible, obvious way to
+# close it. launch.sh kills Hyprland once this script's process exits,
+# so main() waits for whichever of {Chrome, the HTTP server} stops
+# first and tears down the other before returning.
+import argparse
 import glob
 import json
+import mimetypes
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
 
 IDENT_SECONDS = 8
 MENU_WORKSPACE = 890
@@ -122,6 +140,55 @@ SCREEN_DIMENSION_FIELDS = [
     ),
 ]
 
+# Rendering options -- VPX's own [Player] settings for sync/framerate
+# behavior, not Cabinet-specific (unlike Autofit/Screen Dimensions/Full
+# DMD above): these affect Desktop play exactly the same way, so this
+# tool shows them regardless of VPinball Mode. value, display name,
+# description -- same shape as CABINET_AUTOFIT_OPTIONS, wording from
+# VPinballX.ini's own comments for SyncMode.
+SYNC_MODE_OPTIONS = [
+    ("0", "No Sync", "No synchronization."),
+    (
+        "1",
+        "Vertical Sync",
+        "Synchronize on video sync, avoids video tearing at the price of high "
+        "visual latency.",
+    ),
+    (
+        "2",
+        "Adaptive Sync",
+        "Synchronize on video sync, except for late frames (below target FPS), "
+        "also features higher visual latency.",
+    ),
+    (
+        "3",
+        "Frame Pacing",
+        "Paces the frame rendering to limit visual latency, comes with the risk "
+        "of introducing more stutters if the computer is not powerful enough.",
+    ),
+]
+
+MAX_FRAMERATE_FIELD = (
+    "MaxFramerate",
+    "Limit Framerate",
+    "-1 limits FPS to the display refresh rate. 0 does not limit the "
+    "framerate at all. Any other value limits FPS to it directly (lower "
+    "energy use/heat, more stable framerate) -- range -1 to 1000.",
+)
+
+MAX_PRERENDERED_FRAMES_OPTIONS = [
+    (
+        "1",
+        "1 (lowest latency)",
+        "Maximum number of 'frames in flight' (frames pushed to the GPU queue "
+        "waiting for rendering). Recommended to use the lowest value that "
+        "still gives a stable framerate -- higher values can raise FPS, but at "
+        "higher input latency. Not supported in the OpenGL renderer.",
+    ),
+    ("2", "2", ""),
+    ("3", "3 (highest FPS, highest latency)", ""),
+]
+
 # Single on/off toggle (Cabinet mode only) -- checked writes all three
 # keys as 1, unchecked writes all three as 0 (both states explicit, same
 # as BGSet/BackglassOutput/ScoreViewOutput above, so unchecking it after
@@ -163,28 +230,6 @@ def ensure_instance_signature():
     os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = signature
 
 
-def ensure_display(timeout=15):
-    # tkinter (Tcl/Tk) has no native Wayland backend in trixie's version
-    # -- it always needs an X11 DISPLAY, served here by Hyprland's own
-    # Xwayland. Same socket-glob-and-wait pattern as launch.sh's
-    # wait_for_glob for the installer's DISPLAY, reimplemented here since
-    # launch.sh's "shell" client path never sets DISPLAY at all (only
-    # WAYLAND_DISPLAY -- it's meant to be Wayland-client-generic).
-    if os.environ.get("DISPLAY"):
-        return
-    deadline = time.time() + timeout
-    sock = None
-    while time.time() < deadline:
-        matches = glob.glob("/tmp/.X11-unix/X*")
-        if matches:
-            sock = matches[0]
-            break
-        time.sleep(0.2)
-    if not sock:
-        raise RuntimeError("timed out waiting for Xwayland's X11 socket")
-    os.environ["DISPLAY"] = ":" + os.path.basename(sock)[1:]
-
-
 def hyprctl_json(*args):
     proc = subprocess.run(["hyprctl", "-j", *args], capture_output=True, text=True)
     if proc.returncode != 0:
@@ -195,6 +240,18 @@ def hyprctl_json(*args):
 
 def hyprctl(*args):
     subprocess.run(["hyprctl", *args], capture_output=True, text=True, check=False)
+
+
+def hyprctl_result(*args):
+    # Same call as hyprctl() above, but reports success/failure instead of
+    # discarding it -- used only where a caller actually wants to surface
+    # a reload failure to the user (the Save endpoint's status line),
+    # not for the fire-and-forget dispatch calls elsewhere in this file.
+    proc = subprocess.run(["hyprctl", *args], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or f"hyprctl {' '.join(args)} failed"
+        return False, detail
+    return True, proc.stdout.strip()
 
 
 def get_monitors():
@@ -359,10 +416,10 @@ def parse_existing_modes():
 def build_monitor_mode_lines(monitors, chosen_rates):
     # One line per *detected* monitor, not just role-assigned ones (see
     # MODE_BEGIN_MARKER's own comment for why) -- resolution@refresh is
-    # the only thing this tool actually lets you choose; scale is carried
-    # straight over from Hyprland's own live value (see below for why
-    # that specifically, not a hardcoded 1); position is "auto", not a
-    # frozen x/y snapshot (see below for why).
+    # the only thing this tool actually lets you choose; position is
+    # "auto", not a frozen x/y snapshot (see below for why); scale is
+    # always 1 -- no display scaling, period (see below for why that's
+    # not just "whatever Hyprland happens to have").
     #
     # Position: `"auto"` (confirmed a real, valid literal via `strings`
     # on this exact shipped Hyprland binary: "position = \"auto\"", plus
@@ -378,20 +435,32 @@ def build_monitor_mode_lines(monitors, chosen_rates):
     # auto-arrangement is what guarantees those derived positions never
     # overlap. Freezing a snapshot of it as a literal number throws that
     # guarantee away; "auto" keeps it, while still locking in the
-    # resolution/refresh rate and scale this tool actually cares about.
+    # resolution/refresh rate this tool actually cares about.
     #
-    # Scale: `mon["scale"]`, NOT a hardcoded 1 -- confirmed as a real bug
-    # in an earlier version, not a guess: Hyprland's `x`/`y` (now unused
-    # above, but this still matters for the monitor's own logical
-    # footprint) are reported in LOGICAL (post-scale) coordinates, so a
-    # monitor auto-scaled by Hyprland itself (e.g. a 4K output at 2x)
-    # would get a different logical footprint than it actually has if
-    # this were forced to 1 instead of echoing the real value back.
+    # Scale: hardcoded `1`, NOT `mon["scale"]` echoed back -- an earlier
+    # version did echo it back, reasoning that Hyprland's `x`/`y` are
+    # reported in logical (post-scale) coordinates so forcing scale=1
+    # would make a monitor's own logical footprint wrong relative to
+    # that position. True as far as it went, but it missed the actual
+    # problem: a monitor with broken/missing EDID physical-size data
+    # (confirmed directly: `physical size (mm): 0x0` on a real "Audio
+    # Processing Technology Ltd HDMI" monitor) makes Hyprland's own
+    # auto-scale heuristic guess badly -- it picked 2x for a plain
+    # 1920x1080 display with no real basis for it. Echoing that back
+    # into an explicit, permanent `monitor=` line turned a one-time bad
+    # guess into a sticky setting that every future save just
+    # re-confirmed, and halved that monitor's usable logical space in
+    # the process (1920 logical px became 960) -- confirmed directly as
+    # the actual cause of the REFRESH RATE column needing ever-tighter
+    # layout squeezing earlier in this same feature's development.
+    # Requested directly: no display scaling at all. Position="auto"
+    # (above) means forcing scale=1 here doesn't risk reintroducing the
+    # overlap bug either -- Hyprland just recomputes a wider auto-laid-
+    # out desktop from these new, larger footprints.
     lines = []
     for mon in monitors:
         rate = chosen_rates.get(mon["name"], current_rate_of(mon))
-        scale = mon.get("scale", 1) or 1
-        lines.append(f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, {scale:g}")
+        lines.append(f"monitor = {mon['name']}, {mon['width']}x{mon['height']}@{rate:.2f}, auto, 1")
     return lines
 
 
@@ -488,6 +557,31 @@ def parse_existing_cabinet_autofit_mode():
     return value if value in ("0", "1", "2") else "0"
 
 
+def parse_existing_sync_mode():
+    # "3" (Frame Pacing) when blank/missing -- matches VPX's own
+    # documented default for this key, not an arbitrary choice.
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return "3"
+    m = re.search(r"^[ \t]*SyncMode[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+    value = m.group(1) if m else "3"
+    return value if value in ("0", "1", "2", "3") else "3"
+
+
+def parse_existing_max_prerendered_frames():
+    # "1" when blank/missing -- matches VPX's own documented default.
+    try:
+        with open(VPX_INI_PATH) as f:
+            content = f.read()
+    except OSError:
+        return "1"
+    m = re.search(r"^[ \t]*MaxPrerenderedFrames[ \t]*=[ \t]*(\d+)", content, re.IGNORECASE | re.MULTILINE)
+    value = m.group(1) if m else "1"
+    return value if value in ("1", "2", "3") else "1"
+
+
 def parse_existing_screen_field(key):
     try:
         with open(VPX_INI_PATH) as f:
@@ -514,7 +608,8 @@ def parse_existing_fulldmd():
 
 
 def save_vpinball_settings(
-    mode, role_to_monitor, cabinet_autofit_mode=None, screen_fields=None, fulldmd=None
+    mode, role_to_monitor, cabinet_autofit_mode=None, screen_fields=None, fulldmd=None,
+    sync_mode=None, max_framerate=None, max_prerendered_frames=None,
 ):
     ensure_vpinballx_ini()
     with open(VPX_INI_PATH) as f:
@@ -532,6 +627,18 @@ def save_vpinball_settings(
     content = set_ini_value_in_section(content, "ScoreView", "Priority.ScoreView", 1)
     content = set_ini_value_in_section(content, "ScoreView", "Priority.PUP", 3)
     content = set_ini_value_in_section(content, "ScoreView", "Priority.B2SLegacyDMD", 2)
+    # Rendering options -- written regardless of Desktop/Cabinet mode,
+    # unlike the Cabinet-only extras below: SyncMode/MaxFramerate/
+    # MaxPrerenderedFrames affect Desktop play exactly the same way, see
+    # SYNC_MODE_OPTIONS's own comment.
+    if sync_mode is not None:
+        content = set_ini_value(content, "SyncMode", sync_mode)
+    if max_framerate is not None:
+        max_framerate = max_framerate.strip()
+        if max_framerate:
+            content = set_ini_value(content, "MaxFramerate", max_framerate)
+    if max_prerendered_frames is not None:
+        content = set_ini_value(content, "MaxPrerenderedFrames", max_prerendered_frames)
     # Cabinet-only extras -- left untouched entirely in Desktop mode
     # rather than overwritten with blank/default values, since they
     # only matter once Cabinet mode is actually selected.
@@ -575,511 +682,337 @@ def save_vpinfe_settings(role_to_monitor, id_by_monitor):
 
 
 
-# Dark, card-based palette -- deliberately not the default ttk "clam"
-# look (flat gray buttons/labels on plain black), which is what made
-# the first version of this screen look bare. Plain colors/fonts only
-# (no images, no rounded corners) since ttk's "clam" theme is what's
-# actually available here, no extra theme package installed.
-BG = "#0d1117"
-CARD_BG = "#161b22"
-BORDER = "#30363d"
-TEXT = "#e6edf3"
-MUTED = "#8b949e"
-ACCENT = "#2f81f7"
-ACCENT_HOVER = "#4c94ff"
-SUCCESS = "#238636"
-SUCCESS_HOVER = "#2ea043"
-NEUTRAL = "#30363d"
-NEUTRAL_HOVER = "#3d444d"
+WEB = Path(__file__).resolve().parent / "vpinos-config-web"
+API_HEADER = "X-VPinOS-Config"  # required on POSTs -- forces a CORS preflight from other sites, same as vpxconfig
 
 
-def run_gui(monitors):
-    import tkinter as tk
-    from tkinter import ttk
+class App:
+    # All server-side state for one running session. `monitors` is
+    # captured once at startup (same lifetime as the old Tk `ordered`
+    # list captured once at GUI startup) -- a hot-plugged monitor still
+    # needs a restart to be picked up, unchanged from before.
+    def __init__(self, monitors, menu_monitor):
+        self.monitors = monitors
+        self.menu_monitor = menu_monitor
+        self.lock = threading.Lock()
+        self.identifying = False
 
-    ordered = sorted(monitors, key=lambda m: m["id"])
-    menu_monitor = ordered[0]["name"]
-    switch_to(menu_monitor, MENU_WORKSPACE)
-    existing_roles = parse_existing_roles()
-    existing_rates = parse_existing_modes()
+    def meta(self):
+        # Static option lists/descriptions the page needs once, fetched
+        # at load -- keeps all the English copy server-side (single
+        # source of truth) instead of duplicating it in app.js.
+        return {
+            "roles": list(ROLE_WORKSPACE.keys()),
+            "identSeconds": IDENT_SECONDS,
+            "cabinetAutofitOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in CABINET_AUTOFIT_OPTIONS
+            ],
+            "screenDimensionFields": [
+                {"key": k, "name": n, "description": d} for k, n, d in SCREEN_DIMENSION_FIELDS
+            ],
+            "syncModeOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in SYNC_MODE_OPTIONS
+            ],
+            "maxFramerateField": {
+                "key": MAX_FRAMERATE_FIELD[0], "name": MAX_FRAMERATE_FIELD[1], "description": MAX_FRAMERATE_FIELD[2]
+            },
+            "maxPrerenderedFramesOptions": [
+                {"value": v, "name": n, "description": d} for v, n, d in MAX_PRERENDERED_FRAMES_OPTIONS
+            ],
+            "fulldmdDescription": FULLDMD_DESCRIPTION,
+        }
 
-    root = tk.Tk()
-    root.title("VPinOS -- Configuration")
-    root.configure(bg=BG)
-    root.attributes("-fullscreen", True)
+    def state(self):
+        # Re-read fresh every call (cheap regex reads of two small
+        # files) rather than cached once -- reflects any out-of-band
+        # edits, and this is what pre-fills the page's fields.
+        existing_roles = parse_existing_roles()
+        existing_rates = parse_existing_modes()
+        monitors = []
+        for mon in self.monitors:
+            available_rates = refresh_rates_for(mon)
+            default_rate = existing_rates.get(mon["name"], current_rate_of(mon))
+            if default_rate not in available_rates:
+                default_rate = available_rates[0]
+            monitors.append(
+                {
+                    "name": mon["name"],
+                    "id": mon["id"],
+                    "description": mon.get("description", ""),
+                    "geometry": geometry_of(mon),
+                    "rates": available_rates,
+                    "rate": default_rate,
+                    "role": existing_roles.get(mon["name"], ""),
+                }
+            )
+        return {
+            "monitors": monitors,
+            "vpinballMode": parse_existing_vpinball_mode(),
+            "cabinetAutofitMode": parse_existing_cabinet_autofit_mode(),
+            "screenFields": {key: parse_existing_screen_field(key) for key, _, _ in SCREEN_DIMENSION_FIELDS},
+            "fulldmd": parse_existing_fulldmd(),
+            "syncMode": parse_existing_sync_mode(),
+            "maxFramerate": parse_existing_screen_field(MAX_FRAMERATE_FIELD[0]),
+            "maxPrerenderedFrames": parse_existing_max_prerendered_frames(),
+        }
 
-    style = ttk.Style(root)
-    style.theme_use("clam")
-    style.configure("TLabel", background=BG, foreground=TEXT, font=("sans", 13))
-    style.configure("Header.TLabel", background=BG, foreground=TEXT, font=("sans", 22, "bold"))
-    style.configure("Sub.TLabel", background=BG, foreground=MUTED, font=("sans", 11))
-    style.configure("Section.TLabel", background=BG, foreground=TEXT, font=("sans", 14, "bold"))
-    style.configure("Card.TLabel", background=CARD_BG, foreground=TEXT, font=("sans", 13))
+    def show(self, name):
+        mon = next((m for m in self.monitors if m["name"] == name), None)
+        if not mon:
+            return {"error": f"unknown monitor {name!r}"}
+        with self.lock:
+            if self.identifying:
+                return {"error": "already identifying a monitor"}
+            self.identifying = True
 
-    # Smaller font + tighter padding than before -- confirmed the whole
-    # table's natural width mattered directly: this tool opens fullscreen
-    # on whichever monitor it switches to first, which isn't always the
-    # widest one in a multi-monitor cabinet (see the horizontal-scrollbar
-    # comment below for the real report), so less width needed per
-    # widget means less reliance on that scrollbar in the first place.
-    style.configure("TButton", font=("sans", 12, "bold"), padding=(12, 8), relief="flat", borderwidth=0)
-    style.configure("Show.TButton", background=ACCENT, foreground="white")
-    style.map(
-        "Show.TButton",
-        background=[("disabled", BORDER), ("active", ACCENT_HOVER)],
-        foreground=[("disabled", MUTED)],
-    )
-    style.configure("Save.TButton", background=SUCCESS, foreground="white", padding=(24, 12))
-    style.map("Save.TButton", background=[("active", SUCCESS_HOVER)])
-    style.configure("Quit.TButton", background=NEUTRAL, foreground=TEXT, padding=(24, 12))
-    style.map("Quit.TButton", background=[("active", NEUTRAL_HOVER)])
+        def on_done(seconds):
+            # The HTTP request returns immediately (show_monitor()'s own
+            # work is already fast/non-blocking); the delayed switch back
+            # to the menu monitor runs independently on a timer, same as
+            # Tk's root.after() did, just not tied to a widget/mainloop.
+            threading.Timer(seconds, self._return_from_show).start()
 
-    style.configure("TRadiobutton", background=CARD_BG, foreground=TEXT, font=("sans", 11))
-    style.map(
-        "TRadiobutton",
-        background=[("active", CARD_BG)],
-        indicatorcolor=[("selected", ACCENT), ("!selected", BORDER)],
-    )
-    style.configure("Mode.TRadiobutton", background=BG, foreground=TEXT, font=("sans", 11))
-    style.map(
-        "Mode.TRadiobutton",
-        background=[("active", BG)],
-        indicatorcolor=[("selected", ACCENT), ("!selected", BORDER)],
-    )
-    style.configure("TCheckbutton", background=CARD_BG, foreground=TEXT, font=("sans", 11))
-    style.map(
-        "TCheckbutton",
-        background=[("active", CARD_BG)],
-        indicatorcolor=[("selected", ACCENT), ("!selected", BORDER)],
-    )
+        show_monitor(mon, IDENT_SECONDS, on_done)
+        return {"seconds": IDENT_SECONDS}
 
-    # Scrollable body: Cabinet mode's extra sections can push the total
-    # content taller than the screen, and this is a fixed-size fullscreen
-    # window with no window chrome to resize -- confirmed directly, the
-    # bottom (Screen Dimensions, Save/Quit) just ran off the bottom of a
-    # real 1280x800 screen with no way to reach it at all. A Canvas +
-    # Scrollbar is the standard Tk way to make an arbitrarily-tall body
-    # scrollable; everything below is parented to `scroll_frame` (inside
-    # the canvas), not `root`, directly.
-    outer = tk.Frame(root, bg=BG)
-    outer.pack(fill="both", expand=True)
-    canvas = tk.Canvas(outer, bg=BG, highlightthickness=0)
-    scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-    # Horizontal scrollbar too, not just vertical -- confirmed directly,
-    # a real reason this matters now: this tool opens fullscreen on
-    # whichever monitor it switches to first (the lowest-id one, see
-    # menu_monitor below), and that is not necessarily the widest
-    # display in a multi-monitor cabinet. A real report: on a setup
-    # where that monitor's LOGICAL size (Hyprland scale accounted for)
-    # was only 960px wide, the REFRESH RATE column -- the rightmost of
-    # four -- was clipped off entirely with no way to reach it, because
-    # this body previously only ever scrolled vertically. Column widths
-    # below are tuned to comfortably fit a 960-wide screen with real
-    # margin (see that section's own comment for the exact numbers),
-    # but this scrollbar is the actual guarantee: whatever's too wide
-    # for *any* future monitor is still reachable, not silently gone.
-    h_scrollbar = ttk.Scrollbar(outer, orient="horizontal", command=canvas.xview)
-    canvas.configure(yscrollcommand=scrollbar.set, xscrollcommand=h_scrollbar.set)
-    scrollbar.pack(side="right", fill="y")
-    h_scrollbar.pack(side="bottom", fill="x")
-    canvas.pack(side="left", fill="both", expand=True)
+    def _return_from_show(self):
+        switch_to(self.menu_monitor, MENU_WORKSPACE)
+        with self.lock:
+            self.identifying = False
 
-    scroll_frame = tk.Frame(canvas, bg=BG)
-    scroll_window = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
-
-    def _on_scroll_frame_configure(_event=None):
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    def _on_canvas_configure(event):
-        # Widened to the canvas's own width when content fits (the
-        # normal case -- keeps everything centered and filling the
-        # screen, same as before), but never SHRUNK below what the
-        # content actually needs -- that's what used to silently clip
-        # the rightmost column instead of letting the horizontal
-        # scrollbar above reach it.
-        needed = scroll_frame.winfo_reqwidth()
-        canvas.itemconfig(scroll_window, width=max(event.width, needed))
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    scroll_frame.bind("<Configure>", _on_scroll_frame_configure)
-    canvas.bind("<Configure>", _on_canvas_configure)
-
-    def _on_mousewheel(event):
-        if event.num == 5 or event.delta < 0:
-            canvas.yview_scroll(1, "units")
-        else:
-            canvas.yview_scroll(-1, "units")
-
-    # Button-4/-5 (X11/Xwayland scroll-wheel events) and MouseWheel
-    # (harmless if never fired here) both bound -- whichever a real
-    # mouse or trackball sends, plus the scrollbar itself works for a
-    # touchscreen with no wheel at all.
-    canvas.bind_all("<Button-4>", _on_mousewheel)
-    canvas.bind_all("<Button-5>", _on_mousewheel)
-    canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-    root_ = scroll_frame
-
-    ttk.Label(root_, text="VPinOS Configuration", style="Header.TLabel").pack(pady=(36, 4))
-    ttk.Label(
-        root_,
-        text="Press SHOW to identify a screen, then select its role.",
-        style="Sub.TLabel",
-    ).pack(pady=(0, 28))
-
-    # One grid for the header row AND every monitor row, not a separate
-    # header Frame with guessed padx offsets -- confirmed directly that
-    # guessed offsets don't track each row's actual (content-dependent)
-    # widths, so the header drifted out of alignment with the cards
-    # below it. A single shared grid with fixed column minsizes is what
-    # actually keeps them lined up regardless of content width.
-    # Column minsizes + outer padx were previously 460/190/300 and 60,
-    # summing to 1070px (950 of columns + 120 of padx) -- confirmed by
-    # direct Tk geometry measurement (winfo_reqwidth()) that this is the
-    # actual requested width regardless of content, since content alone
-    # only needs ~325px and the columns just pad out to their minsize
-    # floors. On an exactly-1080-wide screen that leaves only 10px of
-    # slack before the scrollbar (15px, see the Canvas/Scrollbar setup
-    # above) even arrives, so the ROLE column (rightmost, column 2) was
-    # the first thing clipped off the right edge with no way to scroll
-    # to it -- confirmed as a real 1080-wide-cabinet report. These
-    # smaller values keep over 250px of slack at 1080 wide while still
-    # being generous relative to what the content actually needs.
-    content = tk.Frame(root_, bg=BG)
-    # Column widths tuned to fit a real, confirmed 960-logical-pixel-wide
-    # screen with actual margin (not just the earlier 1080-wide target --
-    # this tool opens fullscreen on whichever monitor it switches to
-    # first, which on a real multi-monitor cabinet can be the SMALLEST
-    # one once Hyprland's per-output scale is accounted for; see the
-    # horizontal-scrollbar comment above for the real report that
-    # confirmed this). The horizontal scrollbar is the actual guarantee
-    # against clipping; these numbers are about not needing it normally.
-    # `weight=` on all four, in the same ratio as their minsize, not just
-    # column 0 -- on a screen wider than the 780px this naturally needs
-    # (a typical 1080p/4K main display, not the narrow menu-monitor case
-    # above), any extra space used to go entirely to column 0, leaving
-    # IDENTIFY/ROLE/REFRESH RATE pinned at their minimum and the whole
-    # table looking lopsided instead of filling the screen. Weighted
-    # proportionally, all four grow together instead.
-    # Re-measured after shrinking the table's fonts (see the style setup
-    # above) -- natural total dropped from ~780px to ~660px, verified
-    # directly against the real HDMI-A-2/DP-2 data that originally
-    # reproduced this: 684px total vs. the confirmed 960px target, a
-    # 276px margin (up from 156px at the old, larger font sizes).
-    content.pack(padx=12, fill="x")
-    content.grid_columnconfigure(0, minsize=280, weight=28)
-    content.grid_columnconfigure(1, minsize=90, weight=9)
-    content.grid_columnconfigure(2, minsize=170, weight=17)
-    content.grid_columnconfigure(3, minsize=120, weight=12)
-
-    ttk.Label(content, text="MONITOR", style="Sub.TLabel").grid(
-        row=0, column=0, sticky="w", padx=(18, 0), pady=(0, 8)
-    )
-    ttk.Label(content, text="IDENTIFY", style="Sub.TLabel").grid(
-        row=0, column=1, sticky="w", padx=(18, 0), pady=(0, 8)
-    )
-    ttk.Label(content, text="ROLE", style="Sub.TLabel").grid(
-        row=0, column=2, sticky="w", padx=(18, 0), pady=(0, 8)
-    )
-    ttk.Label(content, text="REFRESH RATE", style="Sub.TLabel").grid(
-        row=0, column=3, sticky="w", padx=(18, 0), pady=(0, 8)
-    )
-
-    show_buttons = []
-    role_vars = []
-    rate_vars = []
-
-    def on_show(mon):
-        for b in show_buttons:
-            b.configure(state="disabled")
-        show_monitor(
-            mon,
-            IDENT_SECONDS,
-            lambda seconds: root.after(seconds * 1000, on_return),
-        )
-
-    def on_return():
-        switch_to(menu_monitor, MENU_WORKSPACE)
-        for b in show_buttons:
-            b.configure(state="normal")
-
-    for i, mon in enumerate(ordered):
-        r = i + 1
-        cell_kwargs = {"bg": CARD_BG, "highlightbackground": BORDER, "highlightthickness": 1}
-
-        info_cell = tk.Frame(content, **cell_kwargs)
-        info_cell.grid(row=r, column=0, sticky="nsew", pady=4)
-        info = tk.Frame(info_cell, bg=CARD_BG)
-        info.pack(anchor="w", padx=18, pady=16)
-        name_row = tk.Frame(info, bg=CARD_BG)
-        name_row.pack(anchor="w")
-        tk.Label(name_row, text=mon["name"], bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(side="left")
-        tk.Label(
-            name_row, text=f"  (ID {mon['id']})", bg=CARD_BG, fg=MUTED, font=("sans", 10)
-        ).pack(side="left")
-        sub = f"{mon.get('description', '')}   |   {geometry_of(mon)}"
-        tk.Label(
-            info, text=sub, bg=CARD_BG, fg=MUTED, font=("sans", 10), wraplength=240, justify="left"
-        ).pack(anchor="w", pady=(2, 0))
-
-        show_cell = tk.Frame(content, **cell_kwargs)
-        show_cell.grid(row=r, column=1, sticky="nsew", pady=4)
-        btn = ttk.Button(show_cell, text="SHOW", style="Show.TButton")
-        btn.pack(padx=18, pady=16, anchor="w")
-        btn.configure(command=lambda m=mon: on_show(m))
-        show_buttons.append(btn)
-
-        # Radio buttons, not a dropdown: a ttk.Combobox's dropdown list
-        # is its own separate top-level (popup) window -- confirmed
-        # directly on a real boot that hyprland.conf's kiosk catch-all
-        # windowrule (`match:class = .*`, `fullscreen = 1`) forces that
-        # popup fullscreen too, same as any other window, making it
-        # flash white/fullscreen instead of dropping down normally.
-        # Radio buttons are just widgets drawn inside this same window,
-        # never a separate one, so there's nothing extra for the
-        # catch-all to catch.
-        role_cell = tk.Frame(content, **cell_kwargs)
-        role_cell.grid(row=r, column=2, sticky="nsew", pady=4)
-        role_var = tk.StringVar(value=existing_roles.get(mon["name"], ""))
-        radios = tk.Frame(role_cell, bg=CARD_BG)
-        radios.pack(padx=12, pady=16, anchor="w")
-        for col, role in enumerate(ROLE_WORKSPACE.keys()):
-            ttk.Radiobutton(
-                radios, text=role, value=role, variable=role_var, style="TRadiobutton"
-            ).grid(row=0, column=col, padx=8)
-        role_vars.append((mon, role_var))
-
-        # Same radio-button reasoning as ROLE above (a Combobox's popup
-        # would hit the identical kiosk-fullscreen bug) -- usually just 1-3
-        # options in practice (most displays' EDID lists a small handful
-        # of rates at their native resolution), so a compact radio row
-        # fits the same card layout fine. Defaults to whatever's already
-        # saved in hyprland.conf (existing_rates), falling back to
-        # whatever Hyprland currently has this monitor running at if nothing
-        # was saved yet.
-        rate_cell = tk.Frame(content, **cell_kwargs)
-        rate_cell.grid(row=r, column=3, sticky="nsew", pady=4)
-        available_rates = refresh_rates_for(mon)
-        default_rate = existing_rates.get(mon["name"], current_rate_of(mon))
-        if default_rate not in available_rates:
-            default_rate = available_rates[0]
-        rate_var = tk.DoubleVar(value=default_rate)
-        rate_radios = tk.Frame(rate_cell, bg=CARD_BG)
-        rate_radios.pack(padx=12, pady=16, anchor="w")
-        # Wrapped at 2 per row, not all in one row -- some displays'
-        # EDID lists many legacy rates (23.98/29.97/59.94/119.88 etc.),
-        # and this column's width is what's tight on a 1080-wide screen
-        # (confirmed directly, same class of bug as the earlier
-        # MONITOR/ROLE column-width fix); growing taller instead of
-        # wider is free, the scrollable body already handles that.
-        for i, rate in enumerate(available_rates):
-            row, col = divmod(i, 2)
-            ttk.Radiobutton(
-                rate_radios, text=f"{rate:g}", value=rate, variable=rate_var, style="TRadiobutton"
-            ).grid(row=row, column=col, padx=8, pady=(2, 2), sticky="w")
-        rate_vars.append((mon, rate_var))
-
-    # Last option, below the displays -- Desktop/Cabinet mode
-    # (VPinballX.ini's `BGSet`), plus which of the assigned roles above
-    # actually get their own separate vpinball window
-    # (`BackglassOutput`/`ScoreViewOutput` -- only meaningful once
-    # there's a Backglass/DMD monitor to put them on).
-    # Parented to `root`, not `content` -- `content` is a pure grid
-    # container now (see the row-alignment fix above), and Tk refuses
-    # to mix `pack` and `grid` on children of the same parent
-    # ("cannot use geometry manager pack inside ... which already has
-    # slaves managed by grid"), confirmed directly by a real crash.
-    mode_card = tk.Frame(root_, bg=BG)
-    mode_card.pack(pady=(24, 0))
-    ttk.Label(mode_card, text="VPinball Mode", style="Section.TLabel").pack(anchor="center")
-    mode_frame = tk.Frame(mode_card, bg=BG)
-    mode_frame.pack(anchor="center", pady=(8, 0))
-    vpinball_mode_var = tk.StringVar(value=parse_existing_vpinball_mode())
-    for col, mode in enumerate(("Desktop", "Cabinet")):
-        ttk.Radiobutton(
-            mode_frame, text=mode, value=mode, variable=vpinball_mode_var, style="Mode.TRadiobutton"
-        ).grid(row=0, column=col, padx=(0, 24))
-
-    # Cabinet-only extras -- only meaningful once VPinball Mode =
-    # Cabinet (see VPinballX.ini's own comments), so hidden entirely
-    # otherwise rather than shown but grayed out. Toggled via a trace on
-    # vpinball_mode_var; `before=status` on every re-show since
-    # pack_forget() followed by a bare pack() would otherwise just
-    # append it after whatever's currently last (status/button_row),
-    # losing its position between the mode picker and the status line.
-    DESC_WRAP = 760
-    cabinet_extra = tk.Frame(root_, bg=BG)
-
-    ttk.Label(cabinet_extra, text="Cabinet Autofit Mode", style="Section.TLabel").pack(
-        anchor="w", padx=18, pady=(0, 8)
-    )
-    cabinet_autofit_var = tk.StringVar(value=parse_existing_cabinet_autofit_mode())
-    for value, name, desc in CABINET_AUTOFIT_OPTIONS:
-        row = tk.Frame(cabinet_extra, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-        row.pack(fill="x", pady=4)
-        ttk.Radiobutton(
-            row, value=value, variable=cabinet_autofit_var, style="TRadiobutton"
-        ).pack(side="left", padx=(18, 12), pady=16, anchor="n")
-        text_col = tk.Frame(row, bg=CARD_BG)
-        text_col.pack(side="left", padx=(0, 18), pady=16, fill="x", expand=True)
-        tk.Label(text_col, text=name, bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(anchor="w")
-        tk.Label(
-            text_col, text=desc, bg=CARD_BG, fg=MUTED, font=("sans", 10),
-            wraplength=DESC_WRAP, justify="left",
-        ).pack(anchor="w", pady=(2, 0))
-
-    ttk.Label(cabinet_extra, text="Screen Dimensions", style="Section.TLabel").pack(
-        anchor="w", padx=18, pady=(20, 2)
-    )
-    ttk.Label(
-        cabinet_extra,
-        text='Needed for Autofit ("Fit Table"/"Fit Screen") -- Manual mode ignores these.',
-        style="Sub.TLabel",
-    ).pack(anchor="w", padx=18, pady=(0, 8))
-    screen_field_vars = {}
-    for key, name, desc in SCREEN_DIMENSION_FIELDS:
-        row = tk.Frame(cabinet_extra, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-        row.pack(fill="x", pady=4)
-        text_col = tk.Frame(row, bg=CARD_BG)
-        text_col.pack(side="left", padx=18, pady=16, fill="x", expand=True)
-        tk.Label(text_col, text=name, bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(anchor="w")
-        tk.Label(
-            text_col, text=desc, bg=CARD_BG, fg=MUTED, font=("sans", 10),
-            wraplength=DESC_WRAP, justify="left",
-        ).pack(anchor="w", pady=(2, 0))
-        field_var = tk.StringVar(value=parse_existing_screen_field(key))
-        entry = tk.Entry(
-            row, textvariable=field_var, width=8, bg=BG, fg=TEXT,
-            insertbackground=TEXT, relief="flat", highlightthickness=1,
-            highlightbackground=BORDER, highlightcolor=ACCENT, font=("sans", 13),
-        )
-        entry.pack(side="left", padx=(0, 18))
-        screen_field_vars[key] = field_var
-
-    ttk.Label(cabinet_extra, text="Full DMD", style="Section.TLabel").pack(
-        anchor="w", padx=18, pady=(20, 8)
-    )
-    fulldmd_row = tk.Frame(cabinet_extra, bg=CARD_BG, highlightbackground=BORDER, highlightthickness=1)
-    fulldmd_row.pack(fill="x", pady=4)
-    fulldmd_var = tk.BooleanVar(value=parse_existing_fulldmd())
-    ttk.Checkbutton(
-        fulldmd_row, variable=fulldmd_var, style="TCheckbutton"
-    ).pack(side="left", padx=(18, 12), pady=16, anchor="n")
-    fulldmd_text_col = tk.Frame(fulldmd_row, bg=CARD_BG)
-    fulldmd_text_col.pack(side="left", padx=(0, 18), pady=16, fill="x", expand=True)
-    tk.Label(fulldmd_text_col, text="Full DMD", bg=CARD_BG, fg=TEXT, font=("sans", 14, "bold")).pack(
-        anchor="w"
-    )
-    tk.Label(
-        fulldmd_text_col, text=FULLDMD_DESCRIPTION, bg=CARD_BG, fg=MUTED, font=("sans", 10),
-        wraplength=DESC_WRAP, justify="left",
-    ).pack(anchor="w", pady=(2, 0))
-
-    status = ttk.Label(root_, text="", style="TLabel")
-    status.pack(pady=(24, 0))
-
-    def on_mode_change(*_args):
-        if vpinball_mode_var.get() == "Cabinet":
-            cabinet_extra.pack(fill="x", padx=60, pady=(20, 0), before=status)
-        else:
-            cabinet_extra.pack_forget()
-
-    vpinball_mode_var.trace_add("write", on_mode_change)
-    on_mode_change()
-
-    def on_save():
+    def save(self, body):
+        # Direct port of the old Tk on_save() -- same validation order,
+        # same partial-write-on-error behavior (an error from a later
+        # step does not roll back files already written by an earlier
+        # one, same as before).
+        roles_by_monitor = body.get("roles") or {}
         role_to_monitor = {}
         conflicts = set()
-        for mon, role_var in role_vars:
-            role = role_var.get()
+        for mon in self.monitors:
+            role = roles_by_monitor.get(mon["name"]) or ""
             if not role:
                 continue
             if role in role_to_monitor:
                 conflicts.add(role)
             role_to_monitor[role] = mon["name"]
-
         if conflicts:
-            status.configure(
-                text=f"ERROR: {', '.join(sorted(conflicts))} assigned to more than one monitor.",
-                foreground="#f85149",
-            )
-            return
+            return {"error": f"ERROR: {', '.join(sorted(conflicts))} assigned to more than one monitor."}
 
         lines = build_workspace_lines(role_to_monitor)
         try:
             save_workspace_lines(lines)
         except OSError as exc:
-            status.configure(text=f"ERROR saving hyprland.conf: {exc}", foreground="#f85149")
-            return
+            return {"error": f"ERROR saving hyprland.conf: {exc}"}
         except RuntimeError as exc:
-            status.configure(text=f"ERROR: {exc}", foreground="#f85149")
-            return
+            return {"error": f"ERROR: {exc}"}
 
         # Every detected monitor, not just role-assigned ones (see
-        # MODE_BEGIN_MARKER's own comment) -- `ordered` is the full
-        # detected list, `rate_vars` has one entry per monitor in that
-        # same list regardless of whether it got a role.
-        chosen_rates = {mon["name"]: rate_var.get() for mon, rate_var in rate_vars}
+        # MODE_BEGIN_MARKER's own comment).
+        rates_by_monitor = body.get("rates") or {}
+        chosen_rates = {}
+        for mon in self.monitors:
+            rate = rates_by_monitor.get(mon["name"])
+            chosen_rates[mon["name"]] = float(rate) if rate is not None else current_rate_of(mon)
         try:
             save_marker_block(
-                MODE_BEGIN_MARKER, MODE_END_MARKER, build_monitor_mode_lines(ordered, chosen_rates)
+                MODE_BEGIN_MARKER, MODE_END_MARKER, build_monitor_mode_lines(self.monitors, chosen_rates)
             )
         except OSError as exc:
-            status.configure(text=f"ERROR saving hyprland.conf: {exc}", foreground="#f85149")
-            return
+            return {"error": f"ERROR saving hyprland.conf: {exc}"}
         except RuntimeError as exc:
-            status.configure(text=f"ERROR: {exc}", foreground="#f85149")
-            return
+            return {"error": f"ERROR: {exc}"}
 
         try:
             save_vpinball_settings(
-                vpinball_mode_var.get(),
+                body.get("vpinballMode") or "Desktop",
                 role_to_monitor,
-                cabinet_autofit_mode=cabinet_autofit_var.get(),
-                screen_fields={key: var.get() for key, var in screen_field_vars.items()},
-                fulldmd=fulldmd_var.get(),
+                cabinet_autofit_mode=body.get("cabinetAutofitMode"),
+                screen_fields=body.get("screenFields") or {},
+                fulldmd=bool(body.get("fulldmd")),
+                sync_mode=body.get("syncMode"),
+                max_framerate=body.get("maxFramerate") or "",
+                max_prerendered_frames=body.get("maxPrerenderedFrames"),
             )
         except (OSError, RuntimeError) as exc:
-            status.configure(
-                text=f"Saved hyprland.conf, but ERROR saving VPinballX.ini: {exc}",
-                foreground="#f85149",
-            )
-            return
+            return {"error": f"Saved hyprland.conf, but ERROR saving VPinballX.ini: {exc}"}
 
         saved = "hyprland.conf and VPinballX.ini"
-        if len(ordered) > 1:
-            id_by_monitor = {mon["name"]: mon["id"] for mon in ordered}
+        if len(self.monitors) > 1:
+            id_by_monitor = {mon["name"]: mon["id"] for mon in self.monitors}
             try:
                 save_vpinfe_settings(role_to_monitor, id_by_monitor)
                 saved += " and vpinfe.ini"
             except (OSError, RuntimeError) as exc:
-                status.configure(
-                    text=f"Saved {saved}, but ERROR saving vpinfe.ini: {exc}",
-                    foreground="#f85149",
-                )
+                return {"error": f"Saved {saved}, but ERROR saving vpinfe.ini: {exc}"}
+
+        ok, detail = hyprctl_result("reload")
+        if not ok:
+            return {"message": f"Saved to {saved}, but reload failed: {detail}"}
+        return {"message": f"Saved to {saved}, applied."}
+
+
+def make_handler(app, allowed_hosts, shutdown=None):
+    # Same hand-rolled routing/CSRF-header/shutdown pattern as vpxconfig's
+    # own vpxconfig/server.py -- see that file for the "why" (answer the
+    # /api/shutdown request before calling httpd.shutdown(), since calling
+    # it inline from the request thread deadlocks ThreadingHTTPServer).
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "VPinOSConfig"
+
+        def log_message(self, fmt, *args):
+            print(f"{self.address_string()} {fmt % args}")
+
+        def _send(self, code, body, ctype="application/json"):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _guard(self, write):
+            if allowed_hosts and self.headers.get("Host") not in allowed_hosts:
+                self._send(403, {"error": "unexpected Host header"})
+                return False
+            if write and not self.headers.get(API_HEADER):
+                self._send(403, {"error": f"missing {API_HEADER} header"})
+                return False
+            return True
+
+        def _body(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n) or b"{}")
+
+        def do_GET(self):
+            if not self._guard(False):
                 return
+            path = urlsplit(self.path).path
+            if path == "/api/meta":
+                return self._send(200, app.meta())
+            if path == "/api/state":
+                return self._send(200, app.state())
+            self._static(path)
 
-        hyprctl("reload")
-        status.configure(text=f"Saved to {saved}, applied.", foreground=SUCCESS_HOVER)
+        def do_POST(self):
+            if not self._guard(True):
+                return
+            if self.path == "/api/show":
+                result = app.show(self._body().get("name", ""))
+                return self._send(400 if "error" in result else 200, result)
+            if self.path == "/api/save":
+                result = app.save(self._body())
+                return self._send(400 if "error" in result else 200, result)
+            if self.path == "/api/shutdown" and shutdown:
+                self._send(200, {"ok": True})  # answer first, then stop, so the page can say so
+                self.wfile.flush()
+                shutdown()
+                return
+            self._send(404, {"error": "not found"})
 
-    button_row = tk.Frame(root_, bg=BG)
-    button_row.pack(pady=(8, 30))
-    ttk.Button(button_row, text="Save", style="Save.TButton", command=on_save).grid(row=0, column=0, padx=10)
-    ttk.Button(button_row, text="Quit", style="Quit.TButton", command=root.destroy).grid(row=0, column=1, padx=10)
-    root.bind("<Escape>", lambda e: root.destroy())
+        def _static(self, path):
+            target = (WEB / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
+            if WEB.resolve() not in target.parents or not target.is_file():
+                return self._send(404, {"error": "not found"})
+            ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            self._send(200, target.read_bytes(), ctype)
 
-    root.mainloop()
+    return Handler
+
+
+def create_server(app, host, port):
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    allowed = set() if loopback else None  # filled in once the port is known
+    httpd = ThreadingHTTPServer((host, port), make_handler(app, allowed, shutdown=lambda: stop(httpd)))
+    if loopback:
+        allowed.update(
+            {f"localhost:{httpd.server_port}", f"127.0.0.1:{httpd.server_port}", f"[::1]:{httpd.server_port}"}
+        )
+    return httpd
+
+
+def stop(httpd):
+    # Same reasoning as vpxconfig's own stop(): shutdown() waits for the
+    # serving loop, so calling it from a request-handling thread would
+    # deadlock -- run it on its own thread instead.
+    threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+
+def run_with_chrome(httpd, host, port):
+    # This script is launch.sh's client (see the header comment for why),
+    # so it -- not vpinos-menu.sh -- is responsible for putting a window
+    # on screen: run the HTTP server on a background thread, point
+    # google-chrome at it, then wait for whichever of {Chrome, the
+    # server} stops first and tear down the other, so launch.sh sees
+    # this process exit (and kills Hyprland) however the user quit --
+    # the page's own Quit button (POST /api/shutdown) or Chrome's own
+    # window-close button.
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    # --app=URL (not --kiosk): a plain window with a title bar and close
+    # button, same reasoning as vpxconfig's own Chrome flags --
+    # --start-maximized fills the screen without suppressing that chrome.
+    chrome = subprocess.Popen(
+        [
+            "/usr/bin/google-chrome",
+            f"--app=http://{host}:{port}",
+            "--start-maximized",
+            "--no-first-run",
+            "--disable-session-crashed-bubble",
+            "--noerrdialogs",
+        ]
+    )
+
+    try:
+        while chrome.poll() is None and server_thread.is_alive():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+
+    if chrome.poll() is None:
+        # The server stopped first (the page's own Quit button) -- close
+        # the browser window too, so Quit actually closes everything
+        # instead of leaving an orphaned "stopped" tab open.
+        chrome.terminate()
+        try:
+            chrome.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            chrome.kill()
+
+    if server_thread.is_alive():
+        # Chrome exited first (closed via its own window controls) --
+        # stop the server the same way /api/shutdown does.
+        stop(httpd)
+        server_thread.join(timeout=5)
+
+    httpd.server_close()
 
 
 def main():
     ensure_instance_signature()
+    # Re-apply whatever's already saved in hyprland.conf (role/mode
+    # blocks included) before this tool ever reads monitor state, not
+    # only after Save. Confirmed directly as a real sequencing bug, not
+    # a rendering one: on a fresh boot (or any launch before this
+    # specific session has clicked Save once), Hyprland is still running
+    # whatever IT auto-detected on its own -- e.g. a bad 2x auto-scale
+    # guess from a monitor with broken EDID physical-size data (see
+    # build_monitor_mode_lines()'s own comment) -- because the fix only
+    # actually takes effect via the `hyprctl reload` Save triggers after
+    # writing the corrected config. Without this, the page opens into
+    # that stale, too-narrow layout and only corrects itself once the
+    # user saves, which looks exactly like a layout bug even though the
+    # generated config was already right. Harmless no-op if
+    # hyprland.conf already matches Hyprland's current live state.
+    hyprctl("reload")
     try:
         monitors = get_monitors()
     except (RuntimeError, FileNotFoundError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         print(
             "Is Hyprland running? Run this via:\n"
-            "  /usr/local/bin/launch.sh shell /usr/local/bin/vpinos-config.py",
+            "  /usr/local/bin/launch.sh vpinos-config /usr/local/bin/vpinos-config.py",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1088,19 +1021,33 @@ def main():
         print("hyprctl reported zero monitors.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Found {len(monitors)} monitor(s):\n")
-    for mon in sorted(monitors, key=lambda m: m["id"]):
+    ordered = sorted(monitors, key=lambda m: m["id"])
+    menu_monitor = ordered[0]["name"]
+    # Switch to the menu's own scratch workspace before Chrome ever
+    # opens -- this runs before the server/Chrome are even started
+    # below, so it's guaranteed to have already happened by the time
+    # the browser window appears.
+    switch_to(menu_monitor, MENU_WORKSPACE)
+
+    print(f"Found {len(ordered)} monitor(s):\n")
+    for mon in ordered:
         print(f"  {mon['name']} (ID {mon['id']}): {mon.get('description', '?')}")
         print(f"      {geometry_of(mon)}")
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=1112)
+    args = parser.parse_args()
+
+    app = App(ordered, menu_monitor)
     try:
-        ensure_display()
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        httpd = create_server(app, args.host, args.port)
+    except OSError as exc:
+        print(f"ERROR: couldn't start the server on {args.host}:{args.port}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print("\nOpening the monitor menu...")
-    run_gui(monitors)
+    print(f"\nVPinOS Configuration: http://{args.host}:{httpd.server_port}")
+    run_with_chrome(httpd, args.host, httpd.server_port)
     print("Done.")
 
 

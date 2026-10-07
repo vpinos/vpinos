@@ -96,10 +96,12 @@ s) Shutdown
 ```
 
 "Configuration" (`vpinos-config.py` — was "Monitor Detection" until it grew
-past just monitors) opens a GUI for a multi-monitor cabinet: identify which
-output name (`DP-2`, `HDMI-A-1`, ...) is which physical screen, assign each
-one a role (Table/Backglass/DMD), and save the mapping straight into
-`hyprland.conf`.
+past just monitors) starts a local web server and opens it in a windowed
+Chrome, same pattern as "VPXConfig" below (`127.0.0.1:1112`, this machine
+only, stopped as soon as you close the browser): identify which output name
+(`DP-2`, `HDMI-A-1`, ...) is which physical screen, assign each one a role
+(Table/Backglass/DMD) and refresh rate, set VPinball Mode/Rendering Options,
+and save straight into `hyprland.conf`/`VPinballX.ini`.
 
 "Network Settings" runs `nmtui`, NetworkManager's own text UI — edit or
 activate Ethernet/Wi-Fi connections, and set the system hostname. Not

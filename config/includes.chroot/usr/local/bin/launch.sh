@@ -194,7 +194,7 @@ chmod 1777 /tmp/.X11-unix 2>/dev/null || true
 # /etc/vpinos/hyprland-installer.conf.
 hypr_config=/etc/vpinos/hyprland.conf
 case "$client_name" in
-    installer | vpxconfig) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
+    installer | vpxconfig | vpinos-config) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
 esac
 
 # Switches which GPU kernel module is bound (per /etc/vpinos/gpu-driver,

@@ -98,6 +98,21 @@ run_vpxconfig() {
     trap - INT TERM HUP
 }
 
+# vpinos-config.py (cabinet configuration -- monitor roles/refresh
+# rates, VPinball Mode, Rendering Options, Cabinet Autofit/Screen
+# Dimensions/Full DMD) is a local web server too, same UI tech as
+# vpxconfig above, but UNLIKE vpxconfig it genuinely needs Hyprland
+# already running (every hyprctl call it makes) -- so it can't be
+# started standalone before Hyprland exists the way run_vpxconfig()
+# starts vpxconfig above. It's launch.sh's actual client instead (same
+# role the old Tk GUI played here, and the same role Chrome plays for
+# vpxconfig): launch.sh starts Hyprland and waits for it, THEN runs
+# this script, which gets the monitor list, starts its own server, and
+# spawns google-chrome itself pointed at it (see vpinos-config.py's own
+# header comment and main()). No separate run_/stop_ wrapper needed
+# here -- plain launch.sh invocation, same shape as vpinball/vpinfe
+# below.
+
 # /etc/vpinos/boot-mode is what /etc/profile.d/vpinos-menu.sh reads at
 # login to decide what to auto-launch before falling through to here.
 # Changing it only makes sense on an INSTALLED system -- a live session
@@ -244,7 +259,7 @@ while true; do
     case "$choice" in
         1)
             echo "$(date -Is): menu: selected option 1 (configuration)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh shell /usr/local/bin/vpinos-config.py
+            /usr/local/bin/launch.sh vpinos-config /usr/local/bin/vpinos-config.py
             echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
             ;;
         2)
@@ -315,8 +330,9 @@ while true; do
             gpu_driver_submenu
             ;;
         11)
-            # Same "shell" client pattern as option 1 (vpinos-config.py):
-            # a Tk GUI that manages its own fullscreen presentation, so it
+            # Plain "sysinfo" client_name, not in launch.sh's windowed-
+            # config case arm (unlike option 1's "vpinos-config"): a Tk
+            # GUI that manages its own fullscreen presentation, so it
             # runs fine under the plain kiosk Hyprland config -- no
             # windowed-config special case needed (see launch.sh's
             # hypr_config selection).

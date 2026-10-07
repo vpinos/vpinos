@@ -72,10 +72,13 @@ wayland-utils
 wlr-randr
 
 # python3-tk: Tk/Tcl bindings for python3's built-in tkinter -- used by
-# vpinos-config.py's cabinet configuration menu (real clickable GUI
-# buttons, not a terminal menu; was vpinos-detect-monitors.py before it
-# grew past just monitors). Tk has no native Wayland backend in
-# trixie's version, so it runs over Xwayland (already enabled in
+# vpinos_sysinfo.py's "System Info" debug menu (real clickable GUI
+# buttons, not a terminal menu). NOT vpinos-config.py any more -- that
+# tool was converted to a local web server + browser UI (same
+# architecture as vpxconfig), since Tk had no native Wayland backend
+# and needed per-widget workarounds for the kiosk fullscreen
+# windowrule. Tk still has no native Wayland backend in trixie's
+# version, so vpinos_sysinfo.py runs over Xwayland (already enabled in
 # hyprland.conf) like Calamares does.
 python3-tk
 
