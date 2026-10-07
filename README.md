@@ -29,6 +29,13 @@
 > your tables and settings, and please
 > [report problems](../../issues).
 
+> [!NOTE]
+> **VPinFE needs a network connection on startup to show any tables.** The
+> example tables aren't bundled in the ISO — they're fetched over the network
+> on first boot. This matters most on the **live CD/USB**, where nothing
+> persists between boots: without network, *every* boot starts with an empty
+> table list. See [Sample tables](#sample-tables) for details.
+
 ---
 
 ## What it is
