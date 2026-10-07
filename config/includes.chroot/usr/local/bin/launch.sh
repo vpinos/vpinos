@@ -142,7 +142,56 @@ launch_client() {
     # dying before it could log anything about them. vpinball never hit
     # this because it happens to exit 0.
     set +e
-    stdbuf -oL -eL "$@" >>"$log_file" 2>&1
+    case "$client_name" in
+        # Plain run, no stdbuf, for any client that spawns its OWN
+        # child process(es) -- confirmed directly as the actual cause of
+        # a real, reproduced bug in the installer specifically
+        # (reinstalling VPinOS onto a disk that had already been
+        # through one real install always failed with "The installer
+        # failed to create partition" / "sfdisk --force --append"
+        # failing, even though the partition was genuinely being
+        # created on disk successfully each time -- confirmed directly
+        # via `blkid` right after a "failed" attempt). Root cause:
+        # stdbuf works via LD_PRELOAD (see the env vars it sets --
+        # LD_PRELOAD=.../libstdbuf.so, _STDBUF_O, _STDBUF_E, confirmed
+        # directly by inspecting Calamares's own /proc/<pid>/environ
+        # while it sat on the failure dialog) -- and environment
+        # variables are inherited by every child process unless
+        # something explicitly strips them. Calamares spawns `sfdisk`
+        # as its own child for every partitioning operation, and that
+        # LD_PRELOAD was leaking straight into it, forcing a buffering
+        # library into a program never tested against it -- KPMcore's
+        # own success check for partition creation is a plain text
+        # search for "Created a new partition" in sfdisk's captured
+        # output, confirmed present and well-formed when the exact same
+        # sfdisk command was run by hand in a real terminal (which
+        # never goes through this stdbuf wrapper at all, and never hit
+        # the bug), so the leaked LD_PRELOAD's altered buffering
+        # behavior is the most likely explanation for that text getting
+        # lost/garbled specifically when Calamares ran it.
+        #
+        # That's one confirmed case, not a one-off: the same
+        # architecture (this client launches ITS OWN child process,
+        # inheriting whatever launch.sh gave this client) applies
+        # equally to installer (sfdisk), vpinfe/vpinfe-gamepadtest
+        # (hands off to vpinball when a table is launched), vpxconfig
+        # and vpinos-config (both spawn google-chrome via their
+        # --open-chrome-equivalent flow), and chrome itself (Chrome is
+        # a multi-process app that spawns its own renderer/GPU child
+        # processes internally) -- any of these could hit an equally
+        # subtle, hard-to-diagnose failure in whatever they spawn, so
+        # none of them get the LD_PRELOAD-setting stdbuf wrapper.
+        # vpinball (run directly, not via vpinfe) and sysinfo are the
+        # only two with no known child-process-spawning behavior, so
+        # they're the only ones that still get prompt line-buffered
+        # logging below.
+        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome)
+            "$@" >>"$log_file" 2>&1
+            ;;
+        *)
+            stdbuf -oL -eL "$@" >>"$log_file" 2>&1
+            ;;
+    esac
     rc=$?
     set -e
     echo "$(date -Is): launch.sh: $client_name exited $rc, stopping the compositor" >>"$log_file"

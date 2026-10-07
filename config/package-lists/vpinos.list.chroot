@@ -82,6 +82,12 @@ wlr-randr
 # hyprland.conf) like Calamares does.
 python3-tk
 
+# gdisk: provides sgdisk, a GPT partitioning tool -- not used by
+# anything in this image itself (fdisk/util-linux, already present,
+# provides sfdisk/wipefs/blockdev), added on request for manual
+# disk-wiping/diagnosis from a live shell.
+gdisk
+
 # input / audio
 alsa-utils
 
