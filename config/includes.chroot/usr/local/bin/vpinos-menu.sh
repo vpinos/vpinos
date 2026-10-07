@@ -19,99 +19,20 @@
 # ASCII borders were tried too and still didn't come out right on a
 # real boot. Back to plain POSIX sh/echo, which has no such dependency.
 
-# VPXConfig is a local web server (127.0.0.1:1111) driven from a browser:
-# start it, wait until it answers, run Chrome as launch.sh's client on it,
-# and stop the server as soon as the browser closes (launch.sh returns when
-# its client exits). Bound to loopback only -- it can change system
-# configuration, so it must never listen externally.
-vpxconfig_port=1111
-vpxconfig_log=/var/log/vpinos-vpxconfig.log
-vpxconfig_pid=""
-
-stop_vpxconfig() {
-    [ -n "$vpxconfig_pid" ] || return 0
-    kill "$vpxconfig_pid" 2>/dev/null
-    # vpxconfig is a single-file bundled executable that can leave a
-    # child process behind; make sure nothing of ours is left listening.
-    pkill -u "$(id -u)" -x vpxconfig 2>/dev/null
-    wait "$vpxconfig_pid" 2>/dev/null
-    vpxconfig_pid=""
-    echo "$(date -Is): menu: vpxconfig stopped" >>/var/log/vpinos-menu.log
-}
-
-run_vpxconfig() {
-    # Something (e.g. a leftover instance) already holds the port:
-    # starting a second server would fail and Chrome would open the
-    # stale one instead.
-    if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$vpxconfig_port/"; then
-        echo "Something is already listening on 127.0.0.1:$vpxconfig_port."
-        echo "Stop it first (e.g. 'pkill vpxconfig') and try again."
-        sleep 3
-        return 1
-    fi
-
-    echo "$(date -Is): menu: starting vpxconfig on 127.0.0.1:$vpxconfig_port" >>/var/log/vpinos-menu.log
-    /usr/bin/vpxconfig --host 127.0.0.1 --port "$vpxconfig_port" >>"$vpxconfig_log" 2>&1 &
-    vpxconfig_pid=$!
-    trap 'stop_vpxconfig; exit 1' INT TERM HUP
-
-    # Wait (up to ~30s: a bundled executable unpacks itself on first
-    # run) for the server to answer, bailing out if it already died.
-    echo "Starting VPXConfig..."
-    i=0
-    until curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$vpxconfig_port/"; do
-        if ! kill -0 "$vpxconfig_pid" 2>/dev/null; then
-            echo "VPXConfig exited during startup -- see $vpxconfig_log"
-            echo "$(date -Is): menu: vpxconfig died during startup" >>/var/log/vpinos-menu.log
-            vpxconfig_pid=""
-            trap - INT TERM HUP
-            sleep 3
-            return 1
-        fi
-        i=$((i + 1))
-        if [ "$i" -ge 30 ]; then
-            echo "VPXConfig did not start listening within 30s -- see $vpxconfig_log"
-            stop_vpxconfig
-            trap - INT TERM HUP
-            sleep 3
-            return 1
-        fi
-        sleep 1
-    done
-
-    # client_name "vpxconfig" (not "chrome"): that's what launch.sh matches
-    # on to pick the windowed Hyprland config instead of the fullscreen
-    # kiosk one -- a config tool needs a visible, obvious way to close it,
-    # unlike vpinball/vpinfe/the debug Chrome option. --app=URL (not
-    # --kiosk) opens a plain app window with a title bar and close button
-    # instead of suppressing all window chrome; --start-maximized fills
-    # the screen anyway (a real maximize, not fullscreen -- the title
-    # bar/close button stay visible).
-    #
-    # Returns when the browser is closed; the server is stopped right
-    # after, whatever the browser's exit status was.
-    /usr/local/bin/launch.sh vpxconfig /usr/bin/google-chrome \
-        "--app=http://127.0.0.1:$vpxconfig_port" --start-maximized \
-        --no-first-run --disable-session-crashed-bubble --noerrdialogs
-    echo "$(date -Is): menu: launch.sh (vpxconfig browser) exited $?" >>/var/log/vpinos-menu.log
-    stop_vpxconfig
-    trap - INT TERM HUP
-}
-
-# vpinos-config.py (cabinet configuration -- monitor roles/refresh
-# rates, VPinball Mode, Rendering Options, Cabinet Autofit/Screen
-# Dimensions/Full DMD) is a local web server too, same UI tech as
-# vpxconfig above, but UNLIKE vpxconfig it genuinely needs Hyprland
-# already running (every hyprctl call it makes) -- so it can't be
-# started standalone before Hyprland exists the way run_vpxconfig()
-# starts vpxconfig above. It's launch.sh's actual client instead (same
-# role the old Tk GUI played here, and the same role Chrome plays for
-# vpxconfig): launch.sh starts Hyprland and waits for it, THEN runs
-# this script, which gets the monitor list, starts its own server, and
-# spawns google-chrome itself pointed at it (see vpinos-config.py's own
-# header comment and main()). No separate run_/stop_ wrapper needed
-# here -- plain launch.sh invocation, same shape as vpinball/vpinfe
-# below.
+# VPXConfig and vpinos-config.py (cabinet configuration -- monitor
+# roles/refresh rates, VPinball Mode, Rendering Options, Cabinet
+# Autofit/Screen Dimensions/Full DMD) are both local web servers (the
+# UI opens in a windowed Chrome, not the fullscreen kiosk one -- see
+# launch.sh's hypr_config case arm) that each spawn and own their own
+# Chrome process once launch.sh starts them (vpxconfig via its
+# --open-chrome flag; vpinos-config.py always, since it needs Hyprland
+# running for its hyprctl calls, same as any other graphical client
+# here). Each is launch.sh's actual client -- not something this menu
+# starts standalone and points a separately-launched Chrome at -- so
+# Quit in the page closes the browser window too, and plain launch.sh
+# client/exit-code handling (see its own header comment) is all that's
+# needed: no separate run_/stop_ wrapper, port tracking, or curl
+# health-check here, same shape as vpinball/vpinfe below.
 
 # /etc/vpinos/boot-mode is what /etc/profile.d/vpinos-menu.sh reads at
 # login to decide what to auto-launch before falling through to here.
@@ -316,7 +237,8 @@ while true; do
             ;;
         8)
             echo "$(date -Is): menu: selected option 8 (vpxconfig)" >>/var/log/vpinos-menu.log
-            run_vpxconfig
+            /usr/local/bin/launch.sh vpxconfig /usr/bin/vpxconfig --open-chrome
+            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
             ;;
         9)
             if is_installed; then
