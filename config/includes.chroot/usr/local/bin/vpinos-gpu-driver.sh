@@ -70,7 +70,20 @@ mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
 # than trying to add a matching rebind step.
 case "$mode" in
     nvidia) lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' && exit 0 ;;
-    *) lsmod | grep -q '^nouveau ' && ! lsmod | grep -q '^nvidia ' && exit 0 ;;
+    # Checks that nvidia isn't loaded -- NOT that nouveau specifically
+    # is (the previous version of this check) -- that requirement is
+    # what this branch actually cares about and already achieves
+    # (removing nvidia, loading nouveau only matters on actual NVIDIA
+    # hardware). Confirmed as a real regression from the nouveau-
+    # specific version: on any hardware that's neither nvidia nor
+    # nouveau (AMD, Intel, or -- how this was actually found -- a QEMU
+    # VM's virtio-gpu, which has no reason to ever load nouveau) this
+    # condition was never true, so unbind_fbcon() below ran
+    # unconditionally on literally every single launch with nothing to
+    # ever rebind it -- the exact console-never-repaints-again bug this
+    # early-exit was originally added to fix, just reintroduced for
+    # every GPU driver except nvidia/nouveau.
+    *) ! lsmod | grep -q '^nvidia ' && ! lsmod | grep -q '^nvidia_drm ' && exit 0 ;;
 esac
 
 case "$mode" in
