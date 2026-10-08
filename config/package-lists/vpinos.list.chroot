@@ -88,6 +88,17 @@ python3-tk
 # disk-wiping/diagnosis from a live shell.
 gdisk
 
+# dosfstools: provides mkfs.fat. Calamares/KPMcore needs it to format the
+# EFI system partition during install -- without it, KPMcore's own
+# capability probe for mkfs.fat silently fails and CreateFileSystemJob
+# reports failure with no error message anywhere (not in session.log, not
+# in the GUI's failure details), which is exactly the "failed to create
+# partition" / "sfdisk --force --append" installer bug this was tracked
+# down from. Confirmed missing via `dpkg -l dosfstools` (un, not
+# installed) and `mkfs.fat` absent from /sbin and /usr/sbin on a live
+# session where the install had just failed this way.
+dosfstools
+
 # input / audio
 alsa-utils
 
