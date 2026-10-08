@@ -40,8 +40,8 @@
 # never persists it across a reboot, and boot=live on the kernel cmdline
 # is the same mechanism live-config itself already uses to tell the two
 # apart (see notes/vpinos.md step 5), so it's precedented, not something
-# new. Option 7 (and its whole submenu) simply doesn't exist on a live
-# session -- not shown, not selectable, no renumbering of 1-6 either way.
+# new. "Boot on startup" (inside the Setup submenu) simply doesn't exist
+# on a live session -- not shown, not selectable.
 is_installed() {
     ! grep -q 'boot=live' /proc/cmdline 2>/dev/null
 }
@@ -147,30 +147,167 @@ gpu_driver_submenu() {
     done
 }
 
+# Everything that configures the cabinet rather than runs/tests it --
+# grouped here (instead of flat at the top level) once the menu grew
+# past half a dozen items. "VPinOS Configuration" was the top-level
+# "Configuration" option before this menu had submenus; same
+# vpinos-config.py, same client_name, just relocated and relabeled.
+setup_submenu() {
+    while true; do
+        clear
+        echo "=============================="
+        echo "            Setup"
+        echo "=============================="
+        gcur=$(cat /etc/vpinos/gpu-driver 2>/dev/null)
+        [ -z "$gcur" ] && gcur=default
+        echo "1) GPU Driver: $gcur"
+        echo "2) VPinOS Configuration"
+        echo "3) Network Settings"
+        echo "4) VPXConfig (Advanced VPinball Configuration)"
+        echo "5) VPinFE Map Controls"
+        if is_installed; then
+            bcur=$(cat /etc/vpinos/boot-mode 2>/dev/null)
+            [ -z "$bcur" ] && bcur=menu
+            echo "6) Boot on startup: $bcur"
+        fi
+        echo "q) Back"
+        echo "=============================="
+        printf "Select an option: "
+        read -r schoice
+
+        case "$schoice" in
+            1)
+                gpu_driver_submenu
+                ;;
+            2)
+                echo "$(date -Is): menu: selected setup/vpinos-config" >>/var/log/vpinos-menu.log
+                /usr/local/bin/launch.sh vpinos-config /usr/local/bin/vpinos-config.py
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            3)
+                # nmtui is a plain ncurses TUI (NetworkManager's own) --
+                # no display server needed, unlike every other option
+                # here, so it runs directly in this tty rather than
+                # through launch.sh/Hyprland. Covers both Ethernet and
+                # Wi-Fi connections (edit/activate), plus the system
+                # hostname -- not Wi-Fi-specific despite the common
+                # association. `sudo` (scoped in /etc/sudoers.d/vpinos)
+                # because editing connections needs polkit
+                # auth_admin_keep even for the active local session, and
+                # there's no polkit agent here to satisfy that prompt --
+                # root bypasses it entirely.
+                echo "$(date -Is): menu: selected setup/network-settings" >>/var/log/vpinos-menu.log
+                sudo nmtui
+                echo "$(date -Is): menu: nmtui exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            4)
+                echo "$(date -Is): menu: selected setup/vpxconfig" >>/var/log/vpinos-menu.log
+                /usr/local/bin/launch.sh vpxconfig /usr/bin/vpxconfig --open-chrome
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            5)
+                # --gamepadtest: vpinfe's own controller-mapping mode.
+                # Routed through launch.sh the same as plain vpinfe --
+                # still a real Wayland client needing Hyprland up, just
+                # given an extra flag (launch.sh's own usage comment
+                # already documents `<name> <command> [args...]`, so
+                # this is nothing new). Distinct client_name for its own
+                # clearly-labeled log lines; doesn't affect hypr_config
+                # selection (only "installer"/"vpxconfig"/"vpinos-config"
+                # get the windowed config, everything else -- this
+                # included -- gets the normal fullscreen kiosk one,
+                # matching plain vpinfe's own treatment).
+                echo "$(date -Is): menu: selected setup/vpinfe-map-controls" >>/var/log/vpinos-menu.log
+                /usr/local/bin/launch.sh vpinfe-gamepadtest /opt/vpinfe/vpinfe --gamepadtest
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            6)
+                if is_installed; then
+                    boot_mode_submenu
+                else
+                    echo "Invalid option"
+                    sleep 1
+                fi
+                ;;
+            q|Q)
+                return
+                ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Things you run to try the cabinet out rather than configure it.
+# VPinFE itself lives here on a live session (there's nothing else to
+# reach it from), but is promoted to its own top-level option on an
+# installed system -- that's the one a cabinet builder reaches for
+# constantly once it's actually built, so it doesn't belong a menu
+# level down from day-to-day use.
+testing_submenu() {
+    while true; do
+        clear
+        echo "=============================="
+        echo "           Testing"
+        echo "=============================="
+        echo "1) Launch VPinball Example Table"
+        if ! is_installed; then
+            echo "2) VPinFE"
+        fi
+        echo "q) Back"
+        echo "=============================="
+        printf "Select an option: "
+        read -r tchoice
+
+        case "$tchoice" in
+            1)
+                echo "$(date -Is): menu: selected testing/vpinball-example-table" >>/var/log/vpinos-menu.log
+                /usr/local/bin/launch.sh vpinball \
+                    /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            2)
+                if is_installed; then
+                    echo "Invalid option"
+                    sleep 1
+                else
+                    echo "$(date -Is): menu: selected testing/vpinfe" >>/var/log/vpinos-menu.log
+                    /usr/local/bin/launch.sh vpinfe /opt/vpinfe/vpinfe
+                    echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                fi
+                ;;
+            q|Q)
+                return
+                ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Launch Chrome only (debug) -- not reachable from any menu, but still
+# works if run directly from "Quit to shell":
+#   /usr/local/bin/launch.sh chrome /usr/bin/google-chrome --kiosk \
+#     --enable-logging=stderr --vmodule='*ozone*=1,*wayland*=1' about:blank
+
 while true; do
     clear
     echo "=============================="
     echo "            VPinOS"
     echo "=============================="
-    echo "1) Configuration"
-    echo "2) Network Settings"
-    echo "3) Launch VPinball Example Table"
-    echo "4) VPinFE"
-    echo "5) VPinFE Map Controls"
-    # 6) Launch Chrome only (debug) -- hidden from the menu for now, but
-    # the case arm below is kept working; run it directly if needed:
-    # /usr/local/bin/launch.sh chrome /usr/bin/google-chrome --kiosk ...
-    echo "7) Install VPinOS"
-    echo "8) VPXConfig (Advanced VPinball Configuration)"
+    echo "1) Setup"
     if is_installed; then
-        cur=$(cat /etc/vpinos/boot-mode 2>/dev/null)
-        [ -z "$cur" ] && cur=menu
-        echo "9) Boot on startup: $cur"
+        echo "2) VPinFE"
+        echo "3) Testing"
+    else
+        echo "2) Testing"
+        echo "3) Install VPinOS"
     fi
-    gcur=$(cat /etc/vpinos/gpu-driver 2>/dev/null)
-    [ -z "$gcur" ] && gcur=default
-    echo "10) GPU Driver: $gcur"
-    echo "11) System Info (Debug)"
+    echo "4) System Info (Debug)"
     echo "q) Quit to shell"
     echo "s) Shutdown"
     echo "=============================="
@@ -179,86 +316,33 @@ while true; do
 
     case "$choice" in
         1)
-            echo "$(date -Is): menu: selected option 1 (configuration)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh vpinos-config /usr/local/bin/vpinos-config.py
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+            setup_submenu
             ;;
         2)
-            # nmtui is a plain ncurses TUI (NetworkManager's own) -- no
-            # display server needed, unlike every other option here, so
-            # it runs directly in this tty rather than through
-            # launch.sh/Hyprland. Covers both Ethernet and Wi-Fi
-            # connections (edit/activate), plus the system hostname --
-            # not Wi-Fi-specific despite the common association. `sudo`
-            # (scoped in /etc/sudoers.d/vpinos) because editing
-            # connections needs polkit auth_admin_keep even for the
-            # active local session, and there's no polkit agent here to
-            # satisfy that prompt -- root bypasses it entirely.
-            echo "$(date -Is): menu: selected option 2 (network settings)" >>/var/log/vpinos-menu.log
-            sudo nmtui
-            echo "$(date -Is): menu: nmtui exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        3)
-            echo "$(date -Is): menu: selected option 3 (vpinball)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh vpinball \
-                /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        4)
-            echo "$(date -Is): menu: selected option 4 (vpinfe)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh vpinfe /opt/vpinfe/vpinfe
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        5)
-            # --gamepadtest: vpinfe's own controller-mapping mode. Routed
-            # through launch.sh the same as plain vpinfe (option 4) --
-            # still a real Wayland client needing Hyprland up, just given
-            # an extra flag (launch.sh's own usage comment already
-            # documents `<name> <command> [args...]`, so this is nothing
-            # new). Distinct client_name for its own clearly-labeled log
-            # lines; doesn't affect hypr_config selection (only
-            # "installer"/"vpxconfig" get the windowed config, everything
-            # else -- this included -- gets the normal fullscreen kiosk
-            # one, matching plain vpinfe's own treatment).
-            echo "$(date -Is): menu: selected option 5 (vpinfe map controls)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh vpinfe-gamepadtest /opt/vpinfe/vpinfe --gamepadtest
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        6)
-            echo "$(date -Is): menu: selected option 6 (chrome debug)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh chrome /usr/bin/google-chrome \
-                --kiosk --enable-logging=stderr --vmodule='*ozone*=1,*wayland*=1' about:blank
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        7)
-            echo "$(date -Is): menu: selected option 7 (calamares installer)" >>/var/log/vpinos-menu.log
-            sudo /usr/local/bin/launch.sh installer /usr/bin/calamares
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        8)
-            echo "$(date -Is): menu: selected option 8 (vpxconfig)" >>/var/log/vpinos-menu.log
-            /usr/local/bin/launch.sh vpxconfig /usr/bin/vpxconfig --open-chrome
-            echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
-            ;;
-        9)
             if is_installed; then
-                boot_mode_submenu
+                echo "$(date -Is): menu: selected top/vpinfe" >>/var/log/vpinos-menu.log
+                /usr/local/bin/launch.sh vpinfe /opt/vpinfe/vpinfe
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
             else
-                echo "Invalid option"
-                sleep 1
+                testing_submenu
             fi
             ;;
-        10)
-            gpu_driver_submenu
+        3)
+            if is_installed; then
+                testing_submenu
+            else
+                echo "$(date -Is): menu: selected top/install-vpinos" >>/var/log/vpinos-menu.log
+                sudo /usr/local/bin/launch.sh installer /usr/bin/calamares
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+            fi
             ;;
-        11)
+        4)
             # Plain "sysinfo" client_name, not in launch.sh's windowed-
-            # config case arm (unlike option 1's "vpinos-config"): a Tk
-            # GUI that manages its own fullscreen presentation, so it
-            # runs fine under the plain kiosk Hyprland config -- no
-            # windowed-config special case needed (see launch.sh's
-            # hypr_config selection).
-            echo "$(date -Is): menu: selected option 11 (system info)" >>/var/log/vpinos-menu.log
+            # config case arm: a Tk GUI that manages its own fullscreen
+            # presentation, so it runs fine under the plain kiosk
+            # Hyprland config -- no windowed-config special case needed
+            # (see launch.sh's hypr_config selection).
+            echo "$(date -Is): menu: selected top/sysinfo" >>/var/log/vpinos-menu.log
             /usr/local/bin/launch.sh sysinfo /usr/local/bin/vpinos_sysinfo.py
             echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
             ;;

@@ -86,46 +86,71 @@ the menu and follow the prompts (language, keyboard, partitioning, summary).
 
 The menu launches automatically on login — a plain numbered shell prompt
 ("Quit to shell" drops to a normal shell, e.g. for debugging — running
-`vpinos-menu` by hand brings it back):
+`vpinos-menu` by hand brings it back). The top level differs slightly
+between the live session and an installed system:
 
 ```
-1) Configuration
-2) Network Settings
-3) Launch VPinball Example Table
-4) VPinFE
+live session                      installed system
+--------------------------------  --------------------------------
+1) Setup                          1) Setup
+2) Testing                        2) VPinFE
+3) Install VPinOS                 3) Testing
+4) System Info (Debug)            4) System Info (Debug)
+q) Quit to shell                  q) Quit to shell
+s) Shutdown                       s) Shutdown
+```
+
+"Setup" groups everything that configures the cabinet rather than runs it:
+
+```
+1) GPU Driver: default
+2) VPinOS Configuration
+3) Network Settings
+4) VPXConfig (Advanced VPinball Configuration)
 5) VPinFE Map Controls
-7) Install VPinOS
-8) VPXConfig (Advanced VPinball Configuration)
-9) Boot on startup: menu       (installed systems only)
-10) GPU Driver: default
-q) Quit to shell
-s) Shutdown
+6) Boot on startup: menu       (installed systems only)
 ```
 
-"Configuration" (`vpinos-config.py` — was "Monitor Detection" until it grew
-past just monitors) starts a local web server and opens it in a windowed
-Chrome, same pattern as "VPXConfig" below (`127.0.0.1:1112`, this machine
-only, stopped as soon as you close the browser): identify which output name
-(`DP-2`, `HDMI-A-1`, ...) is which physical screen, assign each one a role
-(Table/Backglass/DMD) and refresh rate, set VPinball Mode/Rendering Options,
-and save straight into `hyprland.conf`/`VPinballX.ini`.
+"VPinOS Configuration" (`vpinos-config.py` — was "Monitor Detection" until it
+grew past just monitors) starts a local web server and opens it in a
+windowed Chrome, same pattern as "VPXConfig" below (`127.0.0.1:1112`, this
+machine only, stopped as soon as you close the browser): identify which
+output name (`DP-2`, `HDMI-A-1`, ...) is which physical screen, assign each
+one a role (Table/Backglass/DMD) and refresh rate, set VPinball
+Mode/Rendering Options, and save straight into
+`hyprland.conf`/`VPinballX.ini`.
 
 "Network Settings" runs `nmtui`, NetworkManager's own text UI — edit or
 activate Ethernet/Wi-Fi connections, and set the system hostname. Not
 Wi-Fi-specific despite the common association.
 
-"VPinFE Map Controls" runs `vpinfe --gamepadtest`, vpinfe's own
-controller-mapping mode.
-
 "VPXConfig" starts a configuration tool with a web interface: the menu
 starts its local server (`127.0.0.1:1111`, this machine only), opens it in a
-fullscreen Chrome, and stops the server as soon as you close the browser.
+windowed Chrome, and stops the server as soon as you close the browser (or
+click its own Quit button).
+
+"VPinFE Map Controls" runs `vpinfe --gamepadtest`, vpinfe's own
+controller-mapping mode.
 
 "Boot on startup" (installed systems only — not shown on the live image) lets
 you pick a program to launch automatically on boot instead of this menu, e.g.
 VPinFE for a cabinet that should go straight to the frontend. Quitting that
 program (or it exiting for any other reason) always falls back to this menu,
 never a dead end.
+
+"Testing" groups things you run to try the cabinet out, rather than
+configure it:
+
+```
+1) Launch VPinball Example Table
+2) VPinFE       (live session only)
+```
+
+VPinFE itself — the cabinet's table-browsing frontend — is tucked into
+Testing on the live session (there's nowhere else to reach it from), but
+promoted to its own top-level option on an installed system: that's the one
+a cabinet builder reaches for constantly once it's actually built, so it
+doesn't sit a menu level down from day-to-day use.
 
 "GPU Driver" switches between the open-source driver this image uses by
 default (Mesa/NVK on NVIDIA hardware, RADV on AMD, Intel's own driver) and
