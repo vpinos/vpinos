@@ -38,3 +38,9 @@
 # rule, so vpinos can't load/unload arbitrary kernel modules. Same
 # narrow-scope reasoning as the three rules above.
 %sudo ALL=(ALL) NOPASSWD: /usr/local/bin/vpinos-gpu-driver.sh
+
+# vpinos-menu's Testing submenu's "SSH Password Authentication" option
+# (live CD only) -- writing an sshd_config.d drop-in and restarting
+# ssh.service both need root. Scoped to this one dedicated script, same
+# narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/local/bin/vpinos-ssh-password-auth.sh

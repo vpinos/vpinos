@@ -317,6 +317,57 @@ setup_submenu() {
     done
 }
 
+# Live CD only (see its one call site's is_installed guard) -- lets
+# you SSH in with a password instead of a key, for debugging from a
+# machine that hasn't got this cabinet's key set up. Off by default;
+# toggling writes/removes a drop-in via vpinos-ssh-password-auth.sh
+# (sudo'd, see /etc/sudoers.d/vpinos) rather than hand-editing
+# /etc/ssh/sshd_config directly -- see that script's own comment.
+ssh_password_auth_submenu() {
+    while true; do
+        clear
+        if [ -e /etc/ssh/sshd_config.d/99-vpinos-live-testing.conf ]; then
+            cur=on
+        else
+            cur=off
+        fi
+        print_logo
+        echo "  SSH Password Authentication"
+        echo "=============================="
+        echo "Currently: $cur"
+        echo
+        echo "1) Enable"
+        echo "2) Disable"
+        echo "q) Cancel, no change"
+        echo "=============================="
+        printf "Select an option: "
+        read -r schoice
+        case "$schoice" in
+            1)
+                sudo /usr/local/bin/vpinos-ssh-password-auth.sh on
+                echo "$(date -Is): menu: ssh-password-auth set to on" >>/var/log/vpinos-menu.log
+                echo "SSH password authentication enabled."
+                sleep 2
+                return
+                ;;
+            2)
+                sudo /usr/local/bin/vpinos-ssh-password-auth.sh off
+                echo "$(date -Is): menu: ssh-password-auth set to off" >>/var/log/vpinos-menu.log
+                echo "SSH password authentication disabled."
+                sleep 2
+                return
+                ;;
+            q|Q)
+                return
+                ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 # Things you run to try the cabinet out rather than configure it.
 # VPinFE itself lives here on a live session (there's nothing else to
 # reach it from), but is promoted to its own top-level option on an
@@ -332,6 +383,12 @@ testing_submenu() {
         echo "1) Launch VPinball Example Table"
         if ! is_installed; then
             echo "2) VPinFE"
+            if [ -e /etc/ssh/sshd_config.d/99-vpinos-live-testing.conf ]; then
+                sshacur=on
+            else
+                sshacur=off
+            fi
+            echo "3) SSH Password Authentication: $sshacur"
         fi
         echo "q) Back"
         echo "=============================="
@@ -353,6 +410,14 @@ testing_submenu() {
                     echo "$(date -Is): menu: selected testing/vpinfe" >>/var/log/vpinos-menu.log
                     /usr/local/bin/launch.sh vpinfe /opt/vpinfe/vpinfe
                     echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                fi
+                ;;
+            3)
+                if is_installed; then
+                    echo "Invalid option"
+                    sleep 1
+                else
+                    ssh_password_auth_submenu
                 fi
                 ;;
             q|Q)

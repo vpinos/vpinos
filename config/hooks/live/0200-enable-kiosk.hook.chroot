@@ -12,6 +12,11 @@ chmod 0755 /usr/local/bin/launch.sh
 # and not writable by vpinos.
 chown root:root /usr/local/bin/vpinos-gpu-driver.sh
 chmod 0755 /usr/local/bin/vpinos-gpu-driver.sh
+# Same reasoning: sudo'd from vpinos-menu.sh's Testing submenu (see
+# /etc/sudoers.d/vpinos), so it must be root-owned and not writable by
+# vpinos.
+chown root:root /usr/local/bin/vpinos-ssh-password-auth.sh
+chmod 0755 /usr/local/bin/vpinos-ssh-password-auth.sh
 chmod +x /usr/local/bin/vpinos-menu.sh
 ln -sf /usr/local/bin/vpinos-menu.sh /usr/local/bin/vpinos-menu
 chmod +x /usr/local/bin/vpinos-config.py
