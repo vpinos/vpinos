@@ -30,11 +30,11 @@
 > [report problems](../../issues).
 
 > [!NOTE]
-> **VPinFE needs a network connection on startup to show any tables.** The
-> example tables aren't bundled in the ISO — they're fetched over the network
-> on first boot. This matters most on the **live CD/USB**, where nothing
-> persists between boots: without network, *every* boot starts with an empty
-> table list. See [Sample tables](#sample-tables) for details.
+> **3 sample tables are bundled directly in the ISO** (Fair Fight, Mars
+> Trek, Halley Comet) — no network needed to see them, live or installed.
+> A 4th table (Cyclopes) is available but not bundled; fetching it
+> requires re-enabling `vpinos-fetch-tables.service`, which is off by
+> default. See [Sample tables](#sample-tables) for details.
 
 ---
 
@@ -218,8 +218,9 @@ Prebuilt ISOs are published on the
   be far too slow for pinball.
 - The installer sets up a **UEFI** boot (GRUB EFI). Installing onto a
   BIOS-only machine has not been tested.
-- A network connection is needed to update, and for the sample tables
-  below on first boot, but not otherwise to run.
+- A network connection is needed to update, and for the 4th sample table
+  (not bundled, see [Sample tables](#sample-tables) below), but not
+  otherwise to run.
 - **A network connection is required to complete installation via
   Calamares.** The image ships without apt package indices (see the
   `lb config` command's `--apt-indices false` further down) to keep the
@@ -258,18 +259,21 @@ hardware with Hyprland/Wayland** &mdash; see `notes/vpinos.md` and
 
 ## Sample tables
 
-VPinFE's table list (`~/tables`) starts empty on a fresh boot. A
-one-time systemd service, `vpinos-fetch-tables.service`, downloads a
-small set of sample tables from
+`~/tables` ships pre-populated with 3 of the 4 tables from
 [`superhac/vpinos-test-tables`](https://github.com/superhac/vpinos-test-tables)
-into it as soon as the network comes up &mdash; these used to be bundled
-directly in the image, but were moved out once they pushed the ISO
-close to GitHub's 2&nbsp;GB release-asset limit. Only runs if `~/tables`
-is empty, so it's genuinely one-time on an **installed** system (every
-boot after the first finds it already populated) and runs every boot
-on a **live** session (nothing persists there anyway). No network on
-first boot just means an empty table list until a later boot has one;
-nothing else is affected.
+&mdash; Fair Fight, Mars Trek and Halley Comet (143.2&nbsp;MB) &mdash;
+fetched at build time, not committed into this repo. The 4th table,
+Cyclopes (103.3&nbsp;MB), is left out: bundling all 4 (246.5&nbsp;MB)
+would push the ISO over GitHub's 2&nbsp;GB release-asset limit.
+
+A systemd service, `vpinos-fetch-tables.service`, can instead download
+the full current set from the network on boot &mdash; **not enabled by
+default for now**, since the bundled tables already populate `~/tables`
+and its own idempotency check would just no-op against that. Re-enable
+it (`systemctl enable vpinos-fetch-tables.service` in
+`0200-enable-kiosk.hook.chroot`) to go back to download-on-boot instead
+of bundling, e.g. if the upstream table set changes enough that the
+bundled copies go stale.
 
 ## Updates: vpinball and vpinfe
 

@@ -1,0 +1,56 @@
+#!/bin/sh
+set -e
+
+# Bundles 3 of the 4 tables from https://github.com/superhac/vpinos-test-tables
+# directly into the image again, into the same ~/tables path
+# vpinos-fetch-tables.service would otherwise populate at boot (see that
+# service's own comment for the full history of why it exists at all --
+# this doesn't replace it, see 0200-enable-kiosk.hook.chroot's own note
+# on why it's no longer enabled by default).
+#
+# Fetched here at BUILD time via curl, NOT committed into this git repo --
+# same reasoning as vpinball/vpinfe (apt, from vpinos/deb-repo) and Chrome
+# (0150-install-chrome.hook.chroot's own curl): large binaries don't
+# belong in this repo's history, matches this project's existing
+# pattern for every other large external binary.
+#
+# Only 3 of the 4 tables, not all of them -- confirmed via the real repo
+# tree (`gh api repos/superhac/vpinos-test-tables/git/trees/master
+# ?recursive=1`) on the day this was added: Cyclopes (103.3M), Halley
+# Comet (60.2M), Mars Trek (51.7M), Fair Fight (31.3M), 246.5M total.
+# Against this image's real ISO size at the time (1,927,495,680 bytes)
+# and GitHub's 2 GiB release-asset hard limit (2,147,483,648 bytes --
+# the same limit that got all sample tables pulled out entirely before,
+# see notes/vpinos.md), there was only ~210MB of headroom -- all 4 don't
+# fit (Cyclopes alone is nearly half the remaining margin). The 3
+# smallest total 143.2MB, leaving ~67MB -- tight but real. Revisit this
+# split if the ISO grows for unrelated reasons (Debian security updates
+# alone nudge it up release over release) or if the upstream repo's
+# table set/sizes change again.
+#
+# No single file here exceeds GitHub's own 100MB hard per-file push
+# limit (confirmed via the same tree query -- largest is Halley Comet's
+# own .directb2s at 26.7MB) -- not that it matters, since these are
+# fetched at build time and never committed, but worth knowing if that
+# ever changes.
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+
+curl -fsSL "https://github.com/superhac/vpinos-test-tables/archive/refs/heads/master.tar.gz" \
+    -o "$workdir/tables.tar.gz"
+
+mkdir -p "$workdir/extracted"
+# --strip-components=1: same reason as vpinos-fetch-tables.sh -- GitHub's
+# archive endpoint wraps everything in one top-level "<repo>-<branch>/"
+# directory that isn't part of the real table layout.
+tar xzf "$workdir/tables.tar.gz" -C "$workdir/extracted" --strip-components=1
+
+mkdir -p /home/vpinos/tables
+cp -r "$workdir/extracted/Fair Fight (Recel 1978)" /home/vpinos/tables/
+cp -r "$workdir/extracted/Mars Trek (Sonic 1977)" /home/vpinos/tables/
+cp -r "$workdir/extracted/Halley Comet (Juegos Populares 1986)" /home/vpinos/tables/
+
+# 0060-create-vpinos-user.hook.chroot's own chown already ran before this
+# hook (package-install/hook ordering, not file ordering) -- this
+# directory didn't exist yet at that point, so it needs its own.
+chown -R vpinos:vpinos /home/vpinos/tables

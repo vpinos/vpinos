@@ -1,7 +1,7 @@
 # Populates ~/tables from https://github.com/superhac/vpinos-test-tables
 # on first boot (see vpinos-fetch-tables.sh for the full reasoning and
-# the idempotency check) -- this image no longer bundles sample tables
-# directly, see notes/vpinos.md step 2.
+# the idempotency check). NOT enabled by default as of 1.0.36+ -- see
+# that script's own comment and notes/vpinos.md for why.
 #
 # After=network-online.target / Wants=network-online.target: a real
 # download needs actual connectivity, not just NetworkManager.service

@@ -62,7 +62,13 @@ systemctl set-default multi-user.target
 systemctl enable seatd.service
 systemctl enable NetworkManager.service
 systemctl enable vpinos-hosts.service
-systemctl enable vpinos-fetch-tables.service
+# NOT enabled for now: 3 of the 4 sample tables are bundled directly
+# into the image again (0105-bundle-sample-tables.hook.chroot), and
+# this service's own idempotency check (an empty-dir test) would just
+# no-op every boot against that, uselessly waiting on
+# network-online.target first. The service/script themselves are left
+# in place, not deleted -- re-enabling this is a one-line change if the
+# bundled set ever goes back to being download-only.
 # TEMPORARY -- see vpinos-exampletable-workaround.service's own comment.
 systemctl enable vpinos-exampletable-workaround.service
 

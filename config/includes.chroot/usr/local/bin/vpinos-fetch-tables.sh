@@ -1,9 +1,15 @@
 #!/bin/sh
 # Populates ~/tables from a GitHub repo of sample tables
-# (https://github.com/superhac/vpinos-test-tables), on first boot only --
-# this image no longer bundles sample tables directly (removed once they
-# pushed the ISO over GitHub's 2 GiB release-asset limit, see
-# notes/vpinos.md step 2). Run as a systemd service (see
+# (https://github.com/superhac/vpinos-test-tables), on first boot only.
+# NOT enabled by default as of 1.0.36+ -- 3 of the 4 tables are bundled
+# directly at build time instead (0105-bundle-sample-tables.hook.chroot),
+# since that build's ISO size left enough headroom under GitHub's 2 GiB
+# release-asset limit for most of the set (see notes/vpinos.md for the
+# exact numbers). This script and its service are left in place,
+# untouched, for exactly the scenario the bundling comment describes --
+# re-enable `vpinos-fetch-tables.service` in
+# 0200-enable-kiosk.hook.chroot to go back to download-on-boot for all
+# 4 tables instead. Run as a systemd service (see
 # vpinos-fetch-tables.service), as the `vpinos` user directly -- not
 # root, not sudo'd -- so whatever it creates is already correctly
 # owned, no chown-after-the-fact needed.
