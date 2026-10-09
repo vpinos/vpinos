@@ -1,0 +1,24 @@
+# Explicit, not left to console-setup's own auto-selection -- its
+# default FONTSIZE is 16 when unset (confirmed directly in setupcon's
+# own source), and Uni2-VGA16.psf.gz (what that default actually
+# loads) is missing glyphs for several characters vpinos-menu.sh/
+# vpinos-banner.sh's logo art uses (▄ ▀ ▓ ▌ ▐ -- confirmed via a PSF1
+# unicode-table parse of every Uni2-VGA* variant), rendering them as
+# the font's literal fallback glyph ('#') instead -- a real regression
+# reported directly from a screenshot, after console-setup was added
+# in the first place to fix a DIFFERENT, milder version of this same
+# glyph-coverage problem (the kernel's own built-in font, used when no
+# console-setup config exists at all, substituting some other
+# placeholder for the same characters).
+#
+# Uni2-VGA14.psf.gz (FONTFACE=VGA, FONTSIZE=14, CODESET from
+# CHARMAP=UTF-8 -- setupcon maps UTF-8 to CODESET=Uni2 automatically)
+# is the one variant confirmed, via that same parse, to have every
+# glyph this project's art needs. CODESET is also set explicitly
+# rather than left to that automatic mapping, so this file stays
+# correct even if that default ever changes upstream.
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="Uni2"
+FONTFACE="VGA"
+FONTSIZE="14"

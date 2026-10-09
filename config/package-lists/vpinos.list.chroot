@@ -99,6 +99,26 @@ gdisk
 # session where the install had just failed this way.
 dosfstools
 
+# console-setup: loads a proper console font with full Unicode Block
+# Elements coverage (▄▀█▓▒░ and friends) at boot, via its own systemd
+# unit -- without it, the kernel falls back to its own minimal built-in
+# fbcon font, which lacks glyphs for most of these, rendering them as a
+# generic hatched/placeholder pattern instead of the real block
+# characters. Confirmed as the actual cause of a real report: the
+# vpinos-menu/vpinos-banner.sh logo (uses these exact characters)
+# looked grainy/dithered on both a real console and a real USB boot
+# (ruling out QEMU/SDL scaling), identically -- `showconsolefont`
+# (kbd) and /etc/default/console-setup both confirmed absent, meaning
+# nothing was loading a font at all. Installing this alone wasn't
+# enough, though -- its auto-picked default (FONTSIZE=16) turned out
+# to be missing several of these exact glyphs too, an even more
+# visible regression (the font's literal fallback glyph, '#', in
+# place of the real characters) confirmed from a real screenshot.
+# config/includes.chroot/etc/default/console-setup now pins the one
+# variant confirmed to have full coverage -- see that file's own
+# comment for how it was verified.
+console-setup
+
 # input / audio
 alsa-utils
 
