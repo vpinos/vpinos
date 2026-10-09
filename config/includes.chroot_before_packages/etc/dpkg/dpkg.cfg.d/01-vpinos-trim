@@ -1,0 +1,36 @@
+# VPinOS is a single-purpose English-language cabinet kiosk, not a
+# localized desktop and not a machine anyone administers via `man`.
+# Staged in includes.chroot_before_packages (copied into the chroot
+# BEFORE any package is unpacked) so dpkg skips extracting these paths
+# for every package from here on, instead of needing them deleted
+# after the fact. Confirmed via `du -sh` on a real built chroot before
+# this existed (uncompressed; these are highly-compressible text, so
+# the real squashfs saving is smaller): /usr/share/locale alone was
+# 218M across 218 language dirs, /usr/share/doc was 74M, /usr/share/man
+# was 18M.
+#
+# Does NOT touch /usr/share/i18n (locale *definitions*, used by
+# Calamares's localecfg module running `locale-gen` on the target
+# during install -- a real dependency, not just docs) or
+# /usr/lib/locale (locale-gen's own generated output, already small).
+# Those are a separate, riskier trim to evaluate on its own.
+
+# Translation catalogs (gettext .mo files): keep English + the
+# locale-name alias table, drop every other language.
+path-exclude=/usr/share/locale/*
+path-include=/usr/share/locale/en/*
+path-include=/usr/share/locale/en_*/*
+path-include=/usr/share/locale/locale.alias
+
+# Man/info pages and groff: nothing in this image's own tooling reads
+# these, and the image has no expected interactive `man` usage.
+path-exclude=/usr/share/man/*
+path-exclude=/usr/share/info/*
+path-exclude=/usr/share/groff/*
+
+# Package docs: drop everything, including copyright files -- Debian
+# policy expects those kept for license compliance, but this is a
+# single-purpose cabinet image with no package-manager-driven install
+# path for end users to go looking for them, and the choice to drop
+# them anyway was made explicitly, not by default.
+path-exclude=/usr/share/doc/*

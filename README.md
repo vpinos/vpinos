@@ -317,7 +317,8 @@ docker run --rm --ulimit nofile=65536:65536 -v "$PWD:/work" -w /work vpinos-buil
     --architectures amd64 \
     --binary-images iso-hybrid \
     --archive-areas "main contrib non-free non-free-firmware" \
-    --bootappend-live "boot=live components username=vpinos"
+    --bootappend-live "boot=live components username=vpinos" \
+    --apt-indices false
 
 # NOT --backports true -- trixie-backports comes from
 # config/archives/vpinos-backports.list instead, pinned to a frozen
@@ -325,6 +326,17 @@ docker run --rm --ulimit nofile=65536:65536 -v "$PWD:/work" -w /work vpinos-buil
 # proved unreliable). See notes/vpinos.md step 2 for the full story,
 # including why config/archives/vpinos-backports.pref pins by
 # `origin snapshot.debian.org`, not just by release/suite name.
+#
+# --apt-indices false -- drops /var/lib/apt/lists (the downloaded
+# Packages/Release/Translation indices for every configured repo,
+# ~168M) from the shipped image after live-build's own final
+# `Apt chroot update` re-sync against the real mirrors. A
+# chroot-stage hook can't do this: that re-sync runs in the later
+# binary stage, after every chroot hook, and silently repopulates
+# whatever a hook deletes. Nothing at runtime needs it --
+# network-manager + systemd-timesyncd are already present, so
+# `apt-get update` works normally the first time anyone installs
+# something on a real cabinet. See notes/vpinos.md for the full story.
 
 # Fix ownership of the generated config only -- never `chown -R` the whole
 # project: it corrupts cache/bootstrap and the built image ends up with its
