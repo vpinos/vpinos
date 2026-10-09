@@ -220,6 +220,16 @@ Prebuilt ISOs are published on the
   BIOS-only machine has not been tested.
 - A network connection is needed to update, and for the sample tables
   below on first boot, but not otherwise to run.
+- **A network connection is required to complete installation via
+  Calamares.** The image ships without apt package indices (see the
+  `lb config` command's `--apt-indices false` further down) to keep the
+  ISO smaller, so the installer refreshes them from the network
+  (`apt-get update`, via `update_db: true` in
+  `config/includes.chroot/etc/calamares/modules/packages.conf`) before it
+  can remove the live-only packages during install. No connection at that
+  point means installation fails with a "Package Manager error". Connect
+  via "Network Settings" (`nmtui`, see below) from the live session
+  *before* launching the installer.
 
 ### NVIDIA video card support
 
