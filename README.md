@@ -156,8 +156,9 @@ doesn't sit a menu level down from day-to-day use.
 default (Mesa/NVK on NVIDIA hardware, RADV on AMD, Intel's own driver) and
 the NVIDIA proprietary driver, precompiled into the image at build time.
 Takes effect on the very next launch — no reboot needed, live or installed.
-Off by default: Hyprland/Wayland compatibility with the proprietary driver
-hasn't been independently verified on real hardware by this project.
+Confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
+multiple testers; NVK/nouveau stays the default simply because it ships
+with the image already, with no separate driver install needed.
 
 "Shutdown" asks for confirmation, then powers the machine off.
 
@@ -252,10 +253,10 @@ module supports Turing and newer GPUs:
 
 Older cards (Kepler, Maxwell, Pascal &mdash; e.g. GTX 900/10-series and
 earlier) aren't supported by this proprietary path at all; they fall back to
-the default NVK/nouveau path above. Also note: the proprietary driver has
-**not yet been independently verified by this project on real NVIDIA
-hardware with Hyprland/Wayland** &mdash; see `notes/vpinos.md` and
-`notes/nvidia-proprietary.md` for the ongoing investigation.
+the default NVK/nouveau path above. The proprietary driver has been
+confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
+multiple testers &mdash; see `notes/nvidia-proprietary.md` for the
+investigation history.
 
 ## Sample tables
 
