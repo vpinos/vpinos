@@ -18,6 +18,15 @@
 # Usage: launch.sh <name-for-logging> <command> [args...]
 #   e.g. launch.sh vpinball /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
 #        launch.sh vpinfe /opt/vpinfe/vpinfe
+#
+# The name "windowed" is reserved: it gets the floating/decorated
+# Hyprland config (see hypr_config below) instead of the default kiosk
+# one, for launching whatever one-off third-party app needs a real
+# window on a given occasion, without having to add that app's own
+# name to launch.sh's hardcoded list (which stays for the few clients
+# this project itself always launches windowed: installer, vpxconfig,
+# vpinos-config).
+#   e.g. launch.sh windowed /opt/wivr/WiVR
 
 set -e
 
@@ -181,11 +190,14 @@ launch_client() {
         # processes internally) -- any of these could hit an equally
         # subtle, hard-to-diagnose failure in whatever they spawn, so
         # none of them get the LD_PRELOAD-setting stdbuf wrapper.
-        # vpinball (run directly, not via vpinfe) and sysinfo are the
-        # only two with no known child-process-spawning behavior, so
-        # they're the only ones that still get prompt line-buffered
-        # logging below.
-        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome)
+        # "windowed" (an arbitrary third-party app, see top of file) is
+        # an unknown quantity by design -- whether it spawns children
+        # isn't knowable here, so it defaults to the same safe side as
+        # these rather than risk the same class of bug. vpinball (run
+        # directly, not via vpinfe) and sysinfo are the only two with
+        # no known child-process-spawning behavior, so they're the
+        # only ones that still get prompt line-buffered logging below.
+        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome | windowed)
             "$@" >>"$log_file" 2>&1
             ;;
         *)
@@ -234,16 +246,18 @@ chmod 1777 /tmp/.X11-unix 2>/dev/null || true
 # about how it's handling a client's surface) are a distinct signal
 # from the client's.
 #
-# The installer and vpxconfig get the windowed config instead of the
-# kiosk one: the kiosk config forces every toplevel fullscreen with no
-# window chrome regardless of what the app itself asks for (that's what
-# stretched Calamares before it got this same treatment under weston),
-# which is right for vpinball/vpinfe but wrong for a config tool the
-# user needs a visible, obvious way to close. See
+# The installer, vpxconfig and vpinos-config always get the windowed
+# config instead of the kiosk one, same as any caller using the
+# reserved "windowed" name (see top of file): the kiosk config forces
+# every toplevel fullscreen with no window chrome regardless of what
+# the app itself asks for (that's what stretched Calamares before it
+# got this same treatment under weston), which is right for
+# vpinball/vpinfe but wrong for a config tool -- or an arbitrary
+# windowed app -- the user needs a visible, obvious way to close. See
 # /etc/vpinos/hyprland-installer.conf.
 hypr_config=/etc/vpinos/hyprland.conf
 case "$client_name" in
-    installer | vpxconfig | vpinos-config) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
+    installer | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
 esac
 
 # Switches which GPU kernel module is bound (per /etc/vpinos/gpu-driver,
