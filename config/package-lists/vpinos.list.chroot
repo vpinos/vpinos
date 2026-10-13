@@ -121,6 +121,27 @@ console-setup
 
 # input / audio
 alsa-utils
+# PipeWire: needed for surround (5.1/7.1) output from VPX. VPX plays
+# through SDL3, and SDL3's ALSA backend registers every card with a
+# hard-coded 2-channel default spec (SDL_AddAudioDevice(..., NULL, ...))
+# that VPX then opens as-is, so on pure ALSA every card is stereo no
+# matter the Sound3D mode -- SDL_AUDIO_CHANNELS doesn't help, it's only
+# consulted when that spec is 0. SDL3's PipeWire backend (bundled
+# libSDL3 dlopens libpipewire-0.3.so.0, tried before ALSA) reports the
+# sink's real channel count instead. Confirmed on a real cabinet with a
+# StarTech ICUSBAUDIO7D (CM6206) USB 7.1 card: ALSA gave
+# `Channels: 2, Driver: alsa`; after installing these and setting the
+# card profile to output:analog-surround-71, VPX's "6ch Side & Rear at
+# lockbar" mode drove all 8 channels. Runs as systemd user services,
+# started by the tty1 autologin's user session.
+# pipewire-alsa: routes plain-ALSA clients (speaker-test, aplay, ...)
+# through PipeWire, so they share the card instead of grabbing hw:
+# exclusively. pulseaudio-utils: pactl, for picking card profiles.
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+pulseaudio-utils
 
 # remote/debug access
 openssh-server
