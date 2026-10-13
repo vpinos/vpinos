@@ -215,51 +215,6 @@ launch_client() {
     kill "$compositor_pid" 2>/dev/null || true
 }
 
-launch_client "$@" &
-
-# Xwayland (weston's own, and per Hyprland's docs its integration works
-# the same way) binds its X11 socket directly under /tmp/.X11-unix --
-# confirmed directly under weston (via a real crash) that it does NOT
-# create that directory itself, and failing to bind there was FATAL to
-# the whole compositor there, not just a gracefully-skipped X11 support.
-# This directory is normally created by systemd-tmpfiles at boot, but
-# isn't reliably present by the time this runs -- ensuring it directly
-# instead of depending on that ordering. Kept for Hyprland too, even
-# though this exact failure mode hasn't been independently reproduced
-# under it -- harmless either way, and cheap insurance against the same
-# class of bug.
-#
-# Tolerate failure on both: vpinball/vpinfe/Chrome now run as `vpinos`
-# (non-root), but the installer still runs as root via `sudo` -- if the
-# installer runs first in a boot session and creates this directory as
-# root, a later non-root chmod attempt here would fail (chmod requires
-# ownership or root) and abort the whole script under `set -e`. Safe to
-# ignore: the directory already being 1777 from that earlier root run
-# is exactly the state this line exists to guarantee anyway.
-mkdir -p /tmp/.X11-unix 2>/dev/null || true
-chmod 1777 /tmp/.X11-unix 2>/dev/null || true
-
-# The compositor's own output has never been captured anywhere -- it
-# inherits whatever tty ran this script, invisible once it paints over
-# that tty's console, the exact same problem solved for the client's
-# output above. Capturing it separately since its own diagnostics (e.g.
-# about how it's handling a client's surface) are a distinct signal
-# from the client's.
-#
-# The installer, vpxconfig and vpinos-config always get the windowed
-# config instead of the kiosk one, same as any caller using the
-# reserved "windowed" name (see top of file): the kiosk config forces
-# every toplevel fullscreen with no window chrome regardless of what
-# the app itself asks for (that's what stretched Calamares before it
-# got this same treatment under weston), which is right for
-# vpinball/vpinfe but wrong for a config tool -- or an arbitrary
-# windowed app -- the user needs a visible, obvious way to close. See
-# /etc/vpinos/hyprland-installer.conf.
-hypr_config=/etc/vpinos/hyprland.conf
-case "$client_name" in
-    installer | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
-esac
-
 # Switches which GPU kernel module is bound (per /etc/vpinos/gpu-driver,
 # see vpinos-menu.sh's "GPU Driver" option) before anything graphical
 # starts -- the one point every client type already passes through, so
@@ -270,29 +225,6 @@ esac
 # runs (which already has root) -- this applies identically whether
 # this invocation itself is root or not.
 sudo /usr/local/bin/vpinos-gpu-driver.sh
-
-# Nvidia-specific GL/EGL vendor env vars -- a real report, confirmed
-# directly, of vpxconfig's Tk UI rendering with invisible controls
-# (they'd only appear on hover, implying stale/uncomposited paint, not
-# a crash) with "nvidia" mode selected. This is the standard fix
-# documented at https://wiki.hypr.land/Nvidia/ for exactly this class
-# of symptom: without forcing glvnd to resolve to nvidia's own
-# GBM/EGL/GLX implementations, Xwayland/Tk can end up negotiating a
-# mismatched render path against the compositor. Gated on gpu-driver
-# mode (reading the same file vpinos-gpu-driver.sh just acted on --
-# its own process can't export back into this one) since GBM_BACKEND=
-# nvidia-drm specifically would break the default open-source Mesa/NVK
-# path for everyone else if set unconditionally.
-# __EGL_VENDOR_LIBRARY_FILENAMES points at a file confirmed present in
-# this image (/usr/share/glvnd/egl_vendor.d/10_nvidia.json, shipped by
-# the nvidia-driver packages installed in
-# 0120-install-nvidia-driver.hook.chroot).
-if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
-    export LIBVA_DRIVER_NAME=nvidia
-    export GBM_BACKEND=nvidia-drm
-    export __GLX_VENDOR_LIBRARY_NAME=nvidia
-    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
-fi
 
 # Multi-GPU exclusion of an unused Intel iGPU -- a real report,
 # confirmed directly over a live SSH session (not guessed, not
@@ -343,19 +275,47 @@ fi
 # 9060 XT with no separate Intel iGPU enabled) included, where
 # Hyprland/Vulkan's own single-device defaults are already correct and
 # shouldn't be second-guessed.
+#
+# Hybrid LAPTOPS are the opposite case: the built-in panel is wired to
+# the Intel iGPU and the discrete GPU has no display of its own -- a
+# real report (Raptor Lake iGPU + RTX 5060 Mobile, using the laptop's
+# own panel) black-screened/"locked up" under nvidia mode because
+# AQ_DRM_DEVICES pointed Hyprland at a GPU with nothing connected. So
+# Hyprland goes wherever the connected display actually is: Intel
+# when only Intel has one, the discrete GPU otherwise (the original
+# cabinet-PC case above, unchanged). VK_ICD_FILENAMES stays on the
+# discrete GPU either way, so vpinball still renders there and is
+# composited on Intel (PRIME).
+#
+# All of this runs BEFORE launch_client is forked below -- it used to
+# run after, so the client never actually inherited VK_ICD_FILENAMES
+# (only Hyprland did).
+has_connected_output() {
+    for status in /sys/class/drm/"$1"-*/status; do
+        [ "$(cat "$status" 2>/dev/null)" = "connected" ] && return 0
+    done
+    return 1
+}
 intel_card=""
 other_card=""
 other_vendor=""
+compositor_on_intel=0
 for card in /sys/class/drm/card[0-9]*; do
     [ -e "$card/device/vendor" ] || continue
     vendor=$(cat "$card/device/vendor" 2>/dev/null)
     case "$vendor" in
-        0x8086) intel_card="/dev/dri/$(basename "$card")" ;;
-        *) other_card="/dev/dri/$(basename "$card")"; other_vendor="$vendor" ;;
+        0x8086) intel_card=$(basename "$card") ;;
+        *) other_card=$(basename "$card"); other_vendor="$vendor" ;;
     esac
 done
 if [ -n "$intel_card" ] && [ -n "$other_card" ]; then
-    export AQ_DRM_DEVICES="$other_card"
+    if has_connected_output "$intel_card" && ! has_connected_output "$other_card"; then
+        export AQ_DRM_DEVICES="/dev/dri/$intel_card"
+        compositor_on_intel=1
+    else
+        export AQ_DRM_DEVICES="/dev/dri/$other_card"
+    fi
+    echo "$(date -Is): launch.sh: hybrid GPUs intel=$intel_card other=$other_card ($other_vendor) -- compositor on $AQ_DRM_DEVICES" >>"$log_file"
     case "$other_vendor" in
         # NVIDIA: which Vulkan ICD is actually correct depends on
         # gpu-driver mode, same split as this file's own nvidia-only
@@ -374,6 +334,90 @@ if [ -n "$intel_card" ] && [ -n "$other_card" ]; then
             ;;
     esac
 fi
+
+launch_client "$@" &
+
+# Nvidia-specific GL/EGL vendor env vars -- a real report, confirmed
+# directly, of vpxconfig's Tk UI rendering with invisible controls
+# (they'd only appear on hover, implying stale/uncomposited paint, not
+# a crash) with "nvidia" mode selected. This is the standard fix
+# documented at https://wiki.hypr.land/Nvidia/ for exactly this class
+# of symptom: without forcing glvnd to resolve to nvidia's own
+# GBM/EGL/GLX implementations, Xwayland/Tk can end up negotiating a
+# mismatched render path against the compositor. Gated on gpu-driver
+# mode (reading the same file vpinos-gpu-driver.sh just acted on --
+# its own process can't export back into this one) since GBM_BACKEND=
+# nvidia-drm specifically would break the default open-source Mesa/NVK
+# path for everyone else if set unconditionally.
+# __EGL_VENDOR_LIBRARY_FILENAMES points at a file confirmed present in
+# this image (/usr/share/glvnd/egl_vendor.d/10_nvidia.json, shipped by
+# the nvidia-driver packages installed in
+# 0120-install-nvidia-driver.hook.chroot).
+#
+# Skipped when Hyprland is compositing on the Intel iGPU instead (the
+# hybrid-laptop case above): forcing nvidia's GBM/EGL onto a compositor
+# running on an Intel device breaks it outright.
+#
+# Also skipped if nvidia_drm didn't actually load (Secure Boot rejecting
+# the unsigned module, a kernel mismatch, ...) -- forcing these with no
+# nvidia driver underneath hung Hyprland on a black screen.
+nvidia_ok=0
+if [ "$(cat /etc/vpinos/gpu-driver 2>/dev/null)" = "nvidia" ]; then
+    if lsmod | grep -q '^nvidia_drm '; then
+        nvidia_ok=1
+    else
+        echo "$(date -Is): launch.sh: gpu-driver is nvidia but nvidia_drm isn't loaded (Secure Boot?) -- not forcing nvidia GBM/EGL" >>"$log_file"
+    fi
+fi
+if [ "$nvidia_ok" = 1 ] && [ "$compositor_on_intel" = 0 ]; then
+    export LIBVA_DRIVER_NAME=nvidia
+    export GBM_BACKEND=nvidia-drm
+    export __GLX_VENDOR_LIBRARY_NAME=nvidia
+    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+fi
+
+# Xwayland (weston's own, and per Hyprland's docs its integration works
+# the same way) binds its X11 socket directly under /tmp/.X11-unix --
+# confirmed directly under weston (via a real crash) that it does NOT
+# create that directory itself, and failing to bind there was FATAL to
+# the whole compositor there, not just a gracefully-skipped X11 support.
+# This directory is normally created by systemd-tmpfiles at boot, but
+# isn't reliably present by the time this runs -- ensuring it directly
+# instead of depending on that ordering. Kept for Hyprland too, even
+# though this exact failure mode hasn't been independently reproduced
+# under it -- harmless either way, and cheap insurance against the same
+# class of bug.
+#
+# Tolerate failure on both: vpinball/vpinfe/Chrome now run as `vpinos`
+# (non-root), but the installer still runs as root via `sudo` -- if the
+# installer runs first in a boot session and creates this directory as
+# root, a later non-root chmod attempt here would fail (chmod requires
+# ownership or root) and abort the whole script under `set -e`. Safe to
+# ignore: the directory already being 1777 from that earlier root run
+# is exactly the state this line exists to guarantee anyway.
+mkdir -p /tmp/.X11-unix 2>/dev/null || true
+chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+
+# The compositor's own output has never been captured anywhere -- it
+# inherits whatever tty ran this script, invisible once it paints over
+# that tty's console, the exact same problem solved for the client's
+# output above. Capturing it separately since its own diagnostics (e.g.
+# about how it's handling a client's surface) are a distinct signal
+# from the client's.
+#
+# The installer, vpxconfig and vpinos-config always get the windowed
+# config instead of the kiosk one, same as any caller using the
+# reserved "windowed" name (see top of file): the kiosk config forces
+# every toplevel fullscreen with no window chrome regardless of what
+# the app itself asks for (that's what stretched Calamares before it
+# got this same treatment under weston), which is right for
+# vpinball/vpinfe but wrong for a config tool -- or an arbitrary
+# windowed app -- the user needs a visible, obvious way to close. See
+# /etc/vpinos/hyprland-installer.conf.
+hypr_config=/etc/vpinos/hyprland.conf
+case "$client_name" in
+    installer | vpxconfig | vpinos-config | windowed) hypr_config=/etc/vpinos/hyprland-installer.conf ;;
+esac
 
 # --i-am-really-stupid: Hyprland refuses to run as root without this
 # (confirmed in `man hyprland` -- "Omits root user privileges check").

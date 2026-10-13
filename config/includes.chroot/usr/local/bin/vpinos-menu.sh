@@ -207,6 +207,21 @@ gpu_driver_submenu() {
                 return
                 ;;
             2)
+                # Secure Boot (kernel lockdown) rejects the unsigned,
+                # build-time-compiled nvidia module outright ("Key was
+                # rejected by service") -- a real report on a Dell
+                # laptop. Selecting it anyway left Hyprland forced onto
+                # nvidia's GBM/EGL with no nvidia driver loaded: a black
+                # screen that looked like a hard lockup.
+                if grep -qE '\[(integrity|confidentiality)\]' /sys/kernel/security/lockdown 2>/dev/null; then
+                    echo "$(date -Is): menu: gpu-driver nvidia refused -- Secure Boot lockdown active" >>/var/log/vpinos-menu.log
+                    echo "Secure Boot is enabled, so the NVIDIA proprietary driver"
+                    echo "can't load. Disable Secure Boot in your BIOS/UEFI setup"
+                    echo "to use it. No change made."
+                    printf "Press Enter to continue..."
+                    read -r _
+                    return
+                fi
                 echo "nvidia" > /etc/vpinos/gpu-driver
                 echo "$(date -Is): menu: gpu-driver set to nvidia" >>/var/log/vpinos-menu.log
                 echo "Will use the NVIDIA proprietary driver on the next launch."
