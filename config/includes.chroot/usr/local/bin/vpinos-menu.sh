@@ -46,6 +46,33 @@ is_installed() {
     ! grep -q 'boot=live' /proc/cmdline 2>/dev/null
 }
 
+# Launches the bundled example table from a per-user copy instead of
+# /opt/vpinball/assets directly. VPX writes its compressed-texture cache
+# next to the table (<table dir>/cache/<table>/), and /opt/vpinball is
+# root-owned (the vpinball package's), so launched from there VPX logged
+# "Failed to create Cache folder ... (Permission denied)" and ran with
+# texture compression off. The copy lives somewhere vpinos can write,
+# so the cache works normally -- without changing any permissions in
+# /opt and without affecting any other table. A copy, not a symlink:
+# not confirmed whether VPX resolves a symlink back to /opt when it
+# picks the cache folder. Refreshed (and its cache dropped) whenever
+# the vpinball package ships a newer one.
+launch_example_table() {
+    src=/opt/vpinball/assets/exampleTable.vpx
+    dir="$HOME/.local/share/vpinos/exampleTable"
+    mkdir -p "$dir"
+    if [ ! -e "$dir/exampleTable.vpx" ] || [ "$src" -nt "$dir/exampleTable.vpx" ]; then
+        if cp "$src" "$dir/exampleTable.vpx"; then
+            rm -rf "$dir/cache"
+        else
+            echo "$(date -Is): menu: couldn't copy the example table, launching it from /opt" >>/var/log/vpinos-menu.log
+            dir=/opt/vpinball/assets
+        fi
+    fi
+    /usr/local/bin/launch.sh vpinball \
+        /opt/vpinball/VPinballX_BGFX -play "$dir/exampleTable.vpx"
+}
+
 # Raw ANSI art + bordered version/IP line for the main menu's header --
 # deliberately NOT shared with /usr/local/bin/vpinos-banner.sh (the
 # identical-looking banner shown on SSH login via
@@ -413,8 +440,7 @@ testing_submenu() {
         case "$tchoice" in
             1)
                 echo "$(date -Is): menu: selected testing/vpinball-example-table" >>/var/log/vpinos-menu.log
-                /usr/local/bin/launch.sh vpinball \
-                    /opt/vpinball/VPinballX_BGFX -play /opt/vpinball/assets/exampleTable.vpx
+                launch_example_table
                 echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
                 ;;
             2)
@@ -446,10 +472,181 @@ testing_submenu() {
     done
 }
 
+# VR (WiVRn streaming to a standalone headset, e.g. a Quest 3, with
+# VPX rendering through OpenXR). Nothing VR-specific ships in the image
+# -- VR > Setup installs it on demand (vpinos-vr-setup.sh); everything
+# else here is vpinos-vr.sh. Start VR server also turns VR on in VPX
+# ([PlayerVR] AskToTurnOn = 0 in VPinballX.ini) and Stop puts the
+# previous value back -- see vpinos-vr.sh. See notes/vr-support.md.
+vr_installed() {
+    [ "$(/usr/local/bin/vpinos-vr-setup.sh status 2>/dev/null)" = installed ]
+}
+
+pause() {
+    printf "Press Enter to continue..."
+    read -r _
+}
+
+vr_setup_submenu() {
+    while true; do
+        clear
+        print_logo
+        echo "          VR Setup"
+        echo "=============================="
+        if ! is_installed; then
+            echo "Live USB: VR components are lost on reboot."
+        fi
+        if vr_installed; then
+            vstate="installed"
+            echo "WiVRn $(dpkg-query -W -f='${Version}' wivrn 2>/dev/null) -- the headset's WiVRn"
+            echo "app must be this same version."
+        else
+            vstate="not installed"
+        fi
+        echo
+        gcur=$(cat /etc/vpinos/gpu-driver 2>/dev/null)
+        [ -z "$gcur" ] && gcur=default
+        echo "1) GPU Driver: $gcur"
+        echo "2) Install VR components ($vstate)"
+        echo "q) Back"
+        echo "=============================="
+        printf "Select an option: "
+        read -r vschoice
+        case "$vschoice" in
+            1)
+                # Same submenu as Setup > GPU Driver -- a second way in
+                # for VR-only users (NVENC needs the proprietary
+                # driver), not a copy of its logic.
+                gpu_driver_submenu
+                ;;
+            2)
+                # Runs straight in this tty, like nmtui -- no Hyprland
+                # needed, and the apt output stays visible.
+                echo "$(date -Is): menu: selected vr/setup/install" >>/var/log/vpinos-menu.log
+                sudo /usr/local/bin/vpinos-vr-setup.sh install
+                echo "$(date -Is): menu: vpinos-vr-setup.sh exited $?" >>/var/log/vpinos-menu.log
+                pause
+                ;;
+            q|Q)
+                return
+                ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+vr_submenu() {
+    while true; do
+        clear
+        print_logo
+        echo "              VR"
+        echo "=============================="
+        if vr_installed; then
+            vrok=1
+            echo "Components: installed"
+            /usr/local/bin/vpinos-vr.sh status
+        else
+            vrok=0
+            echo "Components: not installed (see Setup)"
+        fi
+        echo
+        echo "1) Setup"
+        echo "2) Start VR server"
+        echo "3) Stop VR server"
+        echo "4) Connect headset over USB"
+        echo "5) Pair new headset (Wi-Fi)"
+        echo "6) Launch VPinball Example Table"
+        echo "7) Show server log"
+        echo "q) Back"
+        echo "=============================="
+        printf "Select an option: "
+        read -r vchoice
+
+        case "$vchoice" in
+            [2-7])
+                if [ "$vrok" = 0 ]; then
+                    echo "VR components not installed, run VR > Setup first."
+                    sleep 2
+                    continue
+                fi
+                ;;
+        esac
+
+        case "$vchoice" in
+            1)
+                vr_setup_submenu
+                ;;
+            2)
+                echo "$(date -Is): menu: selected vr/start" >>/var/log/vpinos-menu.log
+                /usr/local/bin/vpinos-vr.sh start
+                /usr/local/bin/vpinos-vr.sh check
+                pause
+                ;;
+            3)
+                echo "$(date -Is): menu: selected vr/stop" >>/var/log/vpinos-menu.log
+                /usr/local/bin/vpinos-vr.sh stop
+                sleep 1
+                ;;
+            4)
+                echo "$(date -Is): menu: selected vr/connect-usb" >>/var/log/vpinos-menu.log
+                /usr/local/bin/vpinos-vr.sh connect-usb
+                pause
+                ;;
+            5)
+                echo "$(date -Is): menu: selected vr/pair" >>/var/log/vpinos-menu.log
+                /usr/local/bin/vpinos-vr.sh pair
+                pause
+                ;;
+            6)
+                echo "$(date -Is): menu: selected vr/vpinball-example-table" >>/var/log/vpinos-menu.log
+                /usr/local/bin/vpinos-vr.sh start || { pause; continue; }
+                if ! /usr/local/bin/vpinos-vr.sh check; then
+                    printf "Launch anyway? [y/N]: "
+                    read -r confirm
+                    case "$confirm" in
+                        y|Y) ;;
+                        *) continue ;;
+                    esac
+                fi
+                # A USB headset gets connected automatically; one on
+                # Wi-Fi connects from the headset itself.
+                if [ "$(adb devices 2>/dev/null | awk 'NR > 1 && NF && $1 !~ /^\*/ { print $2; exit }')" = device ]; then
+                    /usr/local/bin/vpinos-vr.sh connect-usb
+                fi
+                launch_example_table
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            7)
+                # Ctrl+C has to stop tail, not this menu: a handler (not
+                # an ignore, which tail would inherit) keeps the shell
+                # alive while tail still gets the default SIGINT.
+                trap 'true' INT
+                /usr/local/bin/vpinos-vr.sh log
+                trap - INT
+                ;;
+            q|Q)
+                return
+                ;;
+            *)
+                echo "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 # Launch Chrome only (debug) -- not reachable from any menu, but still
 # works if run directly from "Quit to shell":
 #   /usr/local/bin/launch.sh chrome /usr/bin/google-chrome --kiosk \
 #     --enable-logging=stderr --vmodule='*ozone*=1,*wayland*=1' about:blank
+
+# Puts VPX's VR setting back if the VR server isn't running any more
+# (stopped by a reboot or a crash rather than VR > Stop) -- otherwise
+# every table would keep trying to start in VR with no server there.
+/usr/local/bin/vpinos-vr.sh reconcile
 
 while true; do
     clear
@@ -459,12 +656,14 @@ while true; do
     echo "1) Setup"
     if is_installed; then
         echo "2) VPinFE"
-        echo "3) Testing"
+        echo "3) VR"
+        echo "4) Testing"
     else
         echo "2) Testing"
-        echo "3) Install VPinOS"
+        echo "3) VR"
+        echo "4) Install VPinOS"
     fi
-    echo "4) System Info (Debug)"
+    echo "5) System Info (Debug)"
     echo "q) Quit to shell"
     echo "s) Shutdown"
     echo "=============================="
@@ -485,6 +684,9 @@ while true; do
             fi
             ;;
         3)
+            vr_submenu
+            ;;
+        4)
             if is_installed; then
                 testing_submenu
             else
@@ -493,7 +695,7 @@ while true; do
                 echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
             fi
             ;;
-        4)
+        5)
             # Plain "sysinfo" client_name, not in launch.sh's windowed-
             # config case arm: a Tk GUI that manages its own fullscreen
             # presentation, so it runs fine under the plain kiosk

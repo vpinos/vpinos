@@ -45,6 +45,27 @@ unbind_fbcon() {
     return 0
 }
 
+# nvidia-uvm: CUDA's unified-memory module. Nothing graphical needs it,
+# but CUDA does -- without it libcuda's cuInit fails with "unknown error
+# (999)", confirmed on a real Intel+RTX 5060 laptop, so WiVRn (VR
+# streaming, see vpinos-vr.sh) silently fell back to software x264
+# instead of NVENC. nvidia-modprobe -u -c=0 creates the /dev/nvidia-uvm*
+# nodes, which plain modprobe doesn't (same laptop: both were needed).
+# Not via /etc/modules-load.d: this project picks the driver per launch,
+# not at boot, and loading nvidia at boot would fight nouveau in
+# "default" mode. Doesn't touch the console, so unlike the rest of this
+# script it's safe to run even when nothing else needs switching.
+load_uvm() {
+    lsmod | grep -q '^nvidia_uvm ' && return 0
+    modprobe nvidia-uvm 2>/dev/null \
+        || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-uvm failed" >>/var/log/vpinos-menu.log
+    if command -v nvidia-modprobe >/dev/null 2>&1; then
+        nvidia-modprobe -u -c=0 2>/dev/null \
+            || echo "$(date -Is): vpinos-gpu-driver: nvidia-modprobe -u -c=0 failed" >>/var/log/vpinos-menu.log
+    fi
+    return 0
+}
+
 mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
 
 # Skip the whole unbind/modprobe dance entirely when the right driver
@@ -69,7 +90,12 @@ mode=$(cat /etc/vpinos/gpu-driver 2>/dev/null || true)
 # that doesn't need to change, which sidesteps this permanently rather
 # than trying to add a matching rebind step.
 case "$mode" in
-    nvidia) lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia ' && exit 0 ;;
+    nvidia)
+        if lsmod | grep -q '^nvidia_drm ' && lsmod | grep -q '^nvidia '; then
+            load_uvm
+            exit 0
+        fi
+        ;;
     # Checks that nvidia isn't loaded -- NOT that nouveau specifically
     # is (the previous version of this check) -- that requirement is
     # what this branch actually cares about and already achieves
@@ -132,14 +158,15 @@ case "$mode" in
         # non-experimental requirement and is unaffected by any of this.
         modprobe nvidia-drm modeset=1 2>/dev/null \
             || echo "$(date -Is): vpinos-gpu-driver: modprobe nvidia-drm modeset=1 failed" >>/var/log/vpinos-menu.log
+        lsmod | grep -q '^nvidia ' && load_uvm
         ;;
     *)
         # Default/anything unrecognized: plain open-source Mesa (NVK on
         # NVIDIA hardware, RADV on AMD, Intel's own driver) -- make sure
         # nvidia isn't still bound from a previous launch this session.
-        # nvidia-drm first, then nvidia -- the reverse of the load order
-        # above, since nvidia.ko can't unload while nvidia-drm.ko still
-        # references it.
+        # nvidia-drm and nvidia-uvm first, then nvidia -- the reverse of
+        # the load order above, since nvidia.ko can't unload while either
+        # still references it.
         #
         # The explicit `modprobe nouveau` here isn't just defensive --
         # it's required. nvidia-driver ships
@@ -154,6 +181,7 @@ case "$mode" in
         # does.
         unbind_fbcon
         modprobe -r nvidia-drm 2>/dev/null || true
+        modprobe -r nvidia-uvm 2>/dev/null || true
         modprobe -r nvidia 2>/dev/null || true
         modprobe nouveau 2>/dev/null || true
         ;;

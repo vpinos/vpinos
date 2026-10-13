@@ -17,6 +17,9 @@ chmod 0755 /usr/local/bin/vpinos-gpu-driver.sh
 # vpinos.
 chown root:root /usr/local/bin/vpinos-ssh-password-auth.sh
 chmod 0755 /usr/local/bin/vpinos-ssh-password-auth.sh
+chown root:root /usr/local/bin/vpinos-vr-setup.sh
+chmod 0755 /usr/local/bin/vpinos-vr-setup.sh
+chmod +x /usr/local/bin/vpinos-vr.sh
 chmod +x /usr/local/bin/vpinos-menu.sh
 ln -sf /usr/local/bin/vpinos-menu.sh /usr/local/bin/vpinos-menu
 chmod +x /usr/local/bin/vpinos-config.py

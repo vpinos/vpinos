@@ -44,3 +44,9 @@
 # ssh.service both need root. Scoped to this one dedicated script, same
 # narrow-scope reasoning as every other rule above.
 %sudo ALL=(ALL) NOPASSWD: /usr/local/bin/vpinos-ssh-password-auth.sh
+
+# vpinos-menu's VR > Setup > "Install VR components" option -- apt
+# installs (WiVRn, adb, encoder libraries) and the system-wide OpenXR
+# runtime pointer both need root. Scoped to this one dedicated script,
+# same narrow-scope reasoning as every other rule above.
+%sudo ALL=(ALL) NOPASSWD: /usr/local/bin/vpinos-vr-setup.sh

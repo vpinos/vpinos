@@ -92,6 +92,19 @@ launch_client() {
     # argument-less call, in both dash and bash), so this isn't
     # decoration.
 
+    # Stop the compositor whenever this subshell ends, not only on the
+    # normal "exited" path at the bottom -- a real report: VPX was gone,
+    # this function never logged "exited", and Hyprland sat there with
+    # no client, leaving the user on a blank screen (vpinos-menu waiting
+    # on it forever). Root cause still unknown; this is just the safety
+    # net. Also covers the wait_for_glob timeouts below, which used to
+    # return without stopping it. The signal traps route HUP/TERM
+    # through exit so the EXIT trap fires for those too (dash skips EXIT
+    # traps on a death by an untrapped signal); SIGKILL still can't be
+    # caught.
+    trap 'kill "$compositor_pid" 2>/dev/null || true' EXIT
+    trap 'exit 1' HUP TERM
+
     if [ "$client_name" = "installer" ]; then
         # calamares's Wayland support is unreliable -- confirmed
         # directly under weston, not a guess: even with QT_QPA_PLATFORM=

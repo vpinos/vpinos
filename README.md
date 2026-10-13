@@ -57,6 +57,10 @@ as possible:
   real GPU.
 - **Apps:** `vpinball` and `vpinfe` (a cabinet frontend/launcher), plus
   Google Chrome for vpinfe's local UI.
+- **VR (optional, experimental):** play VPinball in a standalone headset
+  such as a Meta Quest 3, streamed from the cabinet with
+  [WiVRn](https://github.com/WiVRn/WiVRn). Installed on demand from the
+  menu, not part of the ISO. See [VR](#vr-experimental).
 - **Account:** one hardcoded appliance user, `vpinos` (password `vpinos`),
   in the `video`, `input`, `audio`, `render`, `dialout`, `plugdev` and
   `sudo` groups. The apps run
@@ -94,8 +98,9 @@ live session                      installed system
 --------------------------------  --------------------------------
 1) Setup                          1) Setup
 2) Testing                        2) VPinFE
-3) Install VPinOS                 3) Testing
-4) System Info (Debug)            4) System Info (Debug)
+3) VR                             3) VR
+4) Install VPinOS                 4) Testing
+5) System Info (Debug)            5) System Info (Debug)
 q) Quit to shell                  q) Quit to shell
 s) Shutdown                       s) Shutdown
 ```
@@ -157,8 +162,13 @@ default (Mesa/NVK on NVIDIA hardware, RADV on AMD, Intel's own driver) and
 the NVIDIA proprietary driver, precompiled into the image at build time.
 Takes effect on the very next launch — no reboot needed, live or installed.
 Confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
-multiple testers; NVK/nouveau stays the default simply because it ships
-with the image already, with no separate driver install needed.
+multiple testers, and **recommended on NVIDIA cards**: testers report poor
+pinball performance with NVK. NVK/nouveau stays the default because it
+needs no setup, and it's the only option for cards older than Turing,
+which the proprietary driver here doesn't support.
+
+"VR" streams VPinball to a standalone VR headset. See
+[VR](#vr-experimental) below.
 
 "Shutdown" asks for confirmation, then powers the machine off.
 
@@ -200,19 +210,25 @@ Prebuilt ISOs are published on the
 - x86-64 PC with a Vulkan-capable GPU. The image ships the **Linux 7.1
   kernel, Mesa 26.1 and current AMD GPU firmware from Debian's
   trixie-backports** (trixie's own 6.12 kernel and Mesa 25.0 are too old for
-  the newest cards). VPinOS uses only the **open-source Mesa drivers**
-  &mdash; no proprietary AMD or NVIDIA drivers &mdash; and they are all
-  included, so no driver install is needed:
+  the newest cards). By default VPinOS uses the **open-source Mesa
+  drivers**, all included, so no driver install is needed:
   - **AMD** &mdash; Mesa RADV
   - **Intel** &mdash; Mesa Intel Vulkan
   - **NVIDIA** &mdash; the open-source NVK driver (Mesa) with NVIDIA's GPU
-    firmware, for Turing (RTX 16/20-series) and newer cards. Not yet tested
-    on real NVIDIA hardware. Older NVIDIA cards (Kepler, Maxwell, Pascal
+    firmware, for Turing (RTX 16/20-series) and newer cards. It runs on
+    real NVIDIA hardware, but testers report **poor performance** with it
+    for pinball, so on NVIDIA the proprietary driver (below) is
+    recommended instead. Older NVIDIA cards (Kepler, Maxwell, Pascal
     &mdash; e.g. Quadro K-series, GTX 900/10-series) are not known to have a
     working Vulkan driver here (untested with the newer Mesa): the kernel's
     `nouveau` driver still runs the display, but Vulkan may fall back to
     software (see below). Whether OpenGL on those cards is usable for
     vpinball is untested.
+
+    **Recommended for NVIDIA:** NVIDIA's **proprietary driver**, which
+    is included in the image as well and switched on from the menu
+    ("GPU Driver"). It's what all current NVIDIA testers use. See
+    [NVIDIA video card support](#nvidia-video-card-support).
 - **How to tell if your GPU is being used:** run `vulkaninfo --summary`. If
   the device is `llvmpipe` (or `lavapipe`), Vulkan is falling back to
   software rendering on the CPU &mdash; the GPU isn't supported, and it will
@@ -257,6 +273,72 @@ the default NVK/nouveau path above. The proprietary driver has been
 confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
 multiple testers &mdash; see `notes/nvidia-proprietary.md` for the
 investigation history.
+
+## VR (experimental)
+
+VPinOS can stream VPinball to a standalone VR headset, such as a
+**Meta Quest 3**, using [WiVRn](https://github.com/WiVRn/WiVRn). VPinball
+renders the table through OpenXR on the cabinet's GPU, and WiVRn encodes it
+and sends it to the headset over **USB** or **Wi-Fi**. This is new and
+still being tested on real hardware, so expect rough edges and please
+[report problems](../../issues).
+
+Nothing VR-related is in the ISO. Everything is installed on demand from
+the menu, so cabinets without a headset don't carry it.
+
+### Setting it up
+
+1. **Headset:** turn on **Developer Mode** for the headset (Meta Horizon
+   phone app), and install the **WiVRn app** on it. The app's version must
+   **match the WiVRn version on the cabinet**, which VR &rarr; Setup shows
+   once installed.
+2. **Cabinet:** `vpinos-menu` &rarr; **VR** &rarr; **Setup** &rarr;
+   **Install VR components**. This needs a network connection. It installs
+   WiVRn and xrizer (from the VPinOS apt repository), adb, and the video
+   encoder libraries that match your GPU.
+3. **NVIDIA cards:** for hardware encoding (NVENC), also set **GPU Driver**
+   to **NVIDIA proprietary**. It's in VR &rarr; Setup too. Without it,
+   WiVRn falls back to slower software encoding. AMD and Intel use VAAPI
+   hardware encoding with the default driver.
+
+On the **live** USB the VR components are lost at every reboot, like
+anything else installed there, so install VPinOS to keep them.
+
+### Playing
+
+```
+              VR
+==============================
+Components: installed
+Server: stopped   Headset (USB): connected
+Encoder: nvenc   VPX VR: off
+
+1) Setup
+2) Start VR server
+3) Stop VR server
+4) Connect headset over USB
+5) Pair new headset (Wi-Fi)
+6) Launch VPinball Example Table
+7) Show server log
+```
+
+- **Start VR server** starts WiVRn and turns VR on in VPinball
+  (`[PlayerVR] AskToTurnOn = 0` in `VPinballX.ini`, which it creates if
+  VPinball hasn't run yet). **Stop VR server** stops WiVRn and puts that
+  setting back to what it was before. While the server is running, every
+  table you launch (from VPinFE too) opens in the headset.
+- **Over USB:** plug the headset in, accept the "Allow USB debugging"
+  prompt inside it the first time, then use **Connect headset over USB**.
+  That starts the WiVRn app on the headset and connects it.
+- **Over Wi-Fi:** the headset finds the cabinet by itself on the same
+  network. A new headset has to be paired once: **Pair new headset**, then
+  enter the PIN shown when the headset asks.
+- **Launch VPinball Example Table** does all of the above and opens the
+  example table, as a quick test.
+
+Other VR settings (refresh rate, table position, passthrough, ...) are
+VPinball's own, in the `[PlayerVR]` section of
+`~/.local/share/VPinballX/10.8/VPinballX.ini`.
 
 ## Sample tables
 
