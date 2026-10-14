@@ -322,10 +322,11 @@ Encoder: nvenc   VPX VR: off
 1) Setup
 2) Start VR server
 3) Stop VR server
-4) Connect headset over USB
-5) Pair new headset (Wi-Fi)
-6) Launch VPinball Example Table
-7) Show server log
+4) WiVRn Dashboard
+5) Connect headset over USB
+6) Pair new headset (Wi-Fi)
+7) Launch VPinball Example Table
+8) Show server log
 ```
 
 - **Start VR server** starts WiVRn and turns VR on in VPinball
@@ -339,6 +340,8 @@ Encoder: nvenc   VPX VR: off
 - **Over Wi-Fi:** the headset finds the cabinet by itself on the same
   network. A new headset has to be paired once: **Pair new headset**, then
   enter the PIN shown when the headset asks.
+- **WiVRn Dashboard** opens WiVRn's own settings app (starting the VR
+  server first). Close it with SUPER+Q to get back to the menu.
 - **Launch VPinball Example Table** does all of the above and opens the
   example table, as a quick test.
 

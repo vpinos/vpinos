@@ -556,17 +556,18 @@ vr_submenu() {
         echo "1) Setup"
         echo "2) Start VR server"
         echo "3) Stop VR server"
-        echo "4) Connect headset over USB"
-        echo "5) Pair new headset (Wi-Fi)"
-        echo "6) Launch VPinball Example Table"
-        echo "7) Show server log"
+        echo "4) WiVRn Dashboard"
+        echo "5) Connect headset over USB"
+        echo "6) Pair new headset (Wi-Fi)"
+        echo "7) Launch VPinball Example Table"
+        echo "8) Show server log"
         echo "q) Back"
         echo "=============================="
         printf "Select an option: "
         read -r vchoice
 
         case "$vchoice" in
-            [2-7])
+            [2-8])
                 if [ "$vrok" = 0 ]; then
                     echo "VR components not installed, run VR > Setup first."
                     sleep 2
@@ -591,16 +592,28 @@ vr_submenu() {
                 sleep 1
                 ;;
             4)
+                # Starts our own server first (GPU driver bound, VPX's VR
+                # setting on, output in vpinos-wivrn.log) so the
+                # dashboard attaches to it over D-Bus instead of
+                # starting a wivrn-server of its own -- one it starts
+                # itself is its child and dies when the dashboard is
+                # closed (the original field-notes problem).
+                echo "$(date -Is): menu: selected vr/wivrn-dashboard" >>/var/log/vpinos-menu.log
+                /usr/local/bin/vpinos-vr.sh start || { pause; continue; }
+                /usr/local/bin/launch.sh wivrn-dashboard /usr/bin/wivrn-dashboard
+                echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
+                ;;
+            5)
                 echo "$(date -Is): menu: selected vr/connect-usb" >>/var/log/vpinos-menu.log
                 /usr/local/bin/vpinos-vr.sh connect-usb
                 pause
                 ;;
-            5)
+            6)
                 echo "$(date -Is): menu: selected vr/pair" >>/var/log/vpinos-menu.log
                 /usr/local/bin/vpinos-vr.sh pair
                 pause
                 ;;
-            6)
+            7)
                 echo "$(date -Is): menu: selected vr/vpinball-example-table" >>/var/log/vpinos-menu.log
                 /usr/local/bin/vpinos-vr.sh start || { pause; continue; }
                 if ! /usr/local/bin/vpinos-vr.sh check; then
@@ -619,7 +632,7 @@ vr_submenu() {
                 launch_example_table
                 echo "$(date -Is): menu: launch.sh exited $?" >>/var/log/vpinos-menu.log
                 ;;
-            7)
+            8)
                 # Ctrl+C has to stop tail, not this menu: a handler (not
                 # an ignore, which tail would inherit) keeps the shell
                 # alive while tail still gets the default SIGINT.

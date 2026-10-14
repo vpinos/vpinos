@@ -206,11 +206,13 @@ launch_client() {
         # "windowed" (an arbitrary third-party app, see top of file) is
         # an unknown quantity by design -- whether it spawns children
         # isn't knowable here, so it defaults to the same safe side as
-        # these rather than risk the same class of bug. vpinball (run
+        # these rather than risk the same class of bug. wivrn-dashboard
+        # (vpinos-menu's VR menu) runs adb, and starts its own
+        # wivrn-server child if none is running. vpinball (run
         # directly, not via vpinfe) and sysinfo are the only two with
         # no known child-process-spawning behavior, so they're the
         # only ones that still get prompt line-buffered logging below.
-        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome | windowed)
+        installer | vpinfe | vpinfe-gamepadtest | vpxconfig | vpinos-config | chrome | windowed | wivrn-dashboard)
             "$@" >>"$log_file" 2>&1
             ;;
         *)
