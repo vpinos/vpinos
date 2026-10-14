@@ -8,7 +8,10 @@
   A minimal, appliance-style Linux for virtual pinball cabinets.<br>
   Boots fast, brings up a GPU-accelerated display, and launches
   <a href="https://github.com/vpinball/vpinball">Visual Pinball</a> and the
-  <strong>vpinfe</strong> frontend &mdash; and nothing else.
+  <strong>vpinfe</strong> frontend.<br>
+  Also plays Visual Pinball in <a href="#vr">VR</a>
+  on standalone headsets like the Meta Quest 3, streamed over USB or Wi-Fi with
+  <a href="https://github.com/WiVRn/WiVRn">WiVRn</a>.
 </p>
 
 <p align="center">
@@ -19,6 +22,8 @@
 
 <p align="center">
   <a href="https://www.youtube.com/playlist?list=PLCu9W14IS_rs"><strong>Watch the videos on YouTube</strong></a>
+  &nbsp;&bull;&nbsp;
+  <a href="https://discord.com/channels/652274650524418078/1555201704574582844"><strong>Join the Discord channel</strong></a>
 </p>
 
 > [!WARNING]
@@ -27,7 +32,8 @@
 > releases, and features that are still placeholders (the console menu, for
 > one). Don't rely on it for anything you can't reinstall, keep backups of
 > your tables and settings, and please
-> [report problems](../../issues).
+> [report problems](../../issues) or drop by the
+> [Discord channel](https://discord.com/channels/652274650524418078/1555201704574582844).
 
 > [!NOTE]
 > **3 sample tables are bundled directly in the ISO** (Fair Fight, Mars
@@ -57,10 +63,10 @@ as possible:
   real GPU.
 - **Apps:** `vpinball` and `vpinfe` (a cabinet frontend/launcher), plus
   Google Chrome for vpinfe's local UI.
-- **VR (optional, experimental):** play VPinball in a standalone headset
+- **VR (optional):** play VPinball in a standalone headset
   such as a Meta Quest 3, streamed from the cabinet with
   [WiVRn](https://github.com/WiVRn/WiVRn). Installed on demand from the
-  menu, not part of the ISO. See [VR](#vr-experimental).
+  menu, not part of the ISO. See [VR](#vr).
 - **Account:** one hardcoded appliance user, `vpinos` (password `vpinos`),
   in the `video`, `input`, `audio`, `render`, `dialout`, `plugdev` and
   `sudo` groups. The apps run
@@ -168,7 +174,7 @@ needs no setup, and it's the only option for cards older than Turing,
 which the proprietary driver here doesn't support.
 
 "VR" streams VPinball to a standalone VR headset. See
-[VR](#vr-experimental) below.
+[VR](#vr) below.
 
 "Shutdown" asks for confirmation, then powers the machine off.
 
@@ -274,14 +280,14 @@ confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
 multiple testers &mdash; see `notes/nvidia-proprietary.md` for the
 investigation history.
 
-## VR (experimental)
+## VR
 
 VPinOS can stream VPinball to a standalone VR headset, such as a
 **Meta Quest 3**, using [WiVRn](https://github.com/WiVRn/WiVRn). VPinball
 renders the table through OpenXR on the cabinet's GPU, and WiVRn encodes it
-and sends it to the headset over **USB** or **Wi-Fi**. This is new and
-still being tested on real hardware, so expect rough edges and please
-[report problems](../../issues).
+and sends it to the headset over **USB** or **Wi-Fi**. It has been
+confirmed working on real hardware by testers; if you hit a problem, please
+[report it](../../issues).
 
 Nothing VR-related is in the ISO. Everything is installed on demand from
 the menu, so cabinets without a headset don't carry it.
