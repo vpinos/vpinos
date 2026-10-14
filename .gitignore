@@ -26,3 +26,7 @@
 # shipped image
 __pycache__/
 *.pyc
+
+# Local test builds only: vpinos-core .debs installed by
+# 0100-install-vpinos-packages.hook.chroot instead of the published one.
+/config/includes.chroot/var/cache/vpinos-local-debs/

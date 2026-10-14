@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# vpinball and vpinfe come from the signed apt repository published by
+# vpinos-core, vpinball and vpinfe come from the signed apt repository published by
 # github.com/vpinos/deb-repo (see /etc/apt/sources.list.d/vpinos.list,
 # shipped via includes.chroot). Installed here rather than from the
 # package list because includes.chroot content -- the source line and
@@ -20,4 +20,31 @@ chmod 0755 /etc/apt/keyrings /etc/apt/sources.list.d
 chmod 0644 /etc/apt/keyrings/vpinos.asc /etc/apt/sources.list.d/vpinos.list
 
 apt-get update
-apt-get install -y vpinball vpinfe vpxconfig
+
+# vpinos-core: the menu, launcher, config tool, helpers, sudoers rules,
+# units and default cabinet config -- everything VPinOS-specific that
+# used to live in includes.chroot, now a package so installed cabinets
+# get changes through apt (built in github.com/vpinos/vpinos-packages,
+# see notes/vpinos-core-update-plan.md). Installed here, after
+# 0060-create-vpinos-user.hook.chroot, because its postinst places the
+# defaults that belong to the `vpinos` user. Its preinst checks
+# /usr/share/vpinos/base-version (includes.chroot) and refuses anything
+# older than the image it was built for.
+#
+# Local test builds only: a vpinos-core .deb dropped into
+# config/includes.chroot/var/cache/vpinos-local-debs/ (gitignored) is
+# installed instead of the published one -- for testing an unreleased
+# package in an ISO. Not config/packages.chroot: live-build installs
+# those before the hooks run, before the `vpinos` user and this apt
+# source (needed for vpinball/vpinfe) exist.
+# vpinos-core is left out of the final install when a local copy went
+# in, or apt would "upgrade" it straight to the published version.
+local_debs=/var/cache/vpinos-local-debs
+core=vpinos-core
+if ls "$local_debs"/*.deb >/dev/null 2>&1; then
+    echo "I: installing local test packages: $(ls "$local_debs")"
+    apt-get install -y "$local_debs"/*.deb
+    rm -rf "$local_debs"
+    core=
+fi
+apt-get install -y $core vpinball vpinfe vpxconfig

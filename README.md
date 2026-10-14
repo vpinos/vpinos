@@ -85,7 +85,7 @@ and whether changes survive a reboot.
 | Login                 | Console autologin as `vpinos` on tty1            | Console autologin as `vpinos` on tty1              |
 | Start the menu        | automatic on login                               | automatic on login                                 |
 | `sudo`                | Passwordless (live session default)              | Asks for the `vpinos` password, except the launcher the menu uses |
-| Updating vpinball / vpinfe | Not useful (lost at reboot) &mdash; use a newer ISO | `sudo apt update && sudo apt upgrade`          |
+| Updating VPinOS       | Not useful (lost at reboot) &mdash; use a newer ISO | Menu &rarr; Update VPinOS, or `sudo apt update && sudo apt upgrade` |
 | Good for              | Trying it, hardware checks, running the installer | Daily use on the cabinet                          |
 
 The **live** session is the way to try VPinOS on a machine without touching
@@ -105,11 +105,16 @@ live session                      installed system
 1) Setup                          1) Setup
 2) Testing                        2) VPinFE
 3) VR                             3) VR
-4) Install VPinOS                 4) Testing
-5) System Info (Debug)            5) System Info (Debug)
-q) Quit to shell                  q) Quit to shell
-s) Shutdown                       s) Shutdown
+4) Install VPinOS                 4) Update VPinOS
+5) System Info (Debug)            5) Testing
+q) Quit to shell                  6) System Info (Debug)
+s) Shutdown                       q) Quit to shell
+                                  s) Shutdown
 ```
+
+"Update VPinOS" (installed systems only) runs the same full update as
+`sudo apt update && sudo apt upgrade`, right in the console, then restarts
+the menu. See [Updates](#updates).
 
 "Setup" groups everything that configures the cabinet rather than runs it:
 
@@ -122,7 +127,7 @@ s) Shutdown                       s) Shutdown
 6) Boot on startup: menu       (installed systems only)
 ```
 
-"VPinOS Configuration" (`vpinos-config.py` — was "Monitor Detection" until it
+"VPinOS Configuration" (`vpinos-config` — was "Monitor Detection" until it
 grew past just monitors) starts a local web server and opens it in a
 windowed Chrome, same pattern as "VPXConfig" below (`127.0.0.1:1112`, this
 machine only, stopped as soon as you close the browser): identify which
@@ -367,21 +372,43 @@ it (`systemctl enable vpinos-fetch-tables.service` in
 of bundling, e.g. if the upstream table set changes enough that the
 bundled copies go stale.
 
-## Updates: vpinball and vpinfe
+## Updates
 
-`vpinball`, `vpinfe` and `vpxconfig` are not compiled into the image. They come from a
-signed apt repository, [`vpinos/deb-repo`](https://github.com/vpinos/deb-repo),
-whose packages are built in
+Since 1.1, VPinOS itself is a package. The menu, launcher, configuration
+tool, helper scripts, sudoers rules and systemd units are `vpinos-core`,
+built in [`vpinos/vpinos-packages`](https://github.com/vpinos/vpinos-packages).
+`vpinball`, `vpinfe` and `vpxconfig` are packages too, built in
 [`vpinos/deb-package-builder`](https://github.com/vpinos/deb-package-builder).
-The repository's source and public key are part of the image, so on an
-**installed** system:
+All of them are published from one signed apt repository,
+[`vpinos/deb-repo`](https://github.com/vpinos/deb-repo), whose source and
+public key are part of the image. So on an **installed** system, either pick
+**Update VPinOS** from the menu or run:
 
 ```bash
 sudo apt update && sudo apt upgrade
 ```
 
-picks up new vpinball / vpinfe / vpxconfig releases and Debian security updates. A newly
-built ISO always contains whatever is currently published there.
+That picks up new VPinOS, vpinball, vpinfe and vpxconfig releases plus
+Debian security updates, with no reinstall. Use `apt upgrade`, not
+`apt-get upgrade`: `apt-get upgrade` won't install new packages, so it holds
+back an update that adds a dependency. A newly built ISO always contains
+whatever is currently published.
+
+**Your cabinet's settings are never touched by an update:**
+`/etc/vpinos/hyprland.conf` (including the monitor layout set in VPinOS
+Configuration), `/etc/vpinos/hyprland-installer.conf`, the boot mode and GPU
+driver choices, and `~/.config/vpinfe/` (settings and theme) are written
+once, at install, and left alone after that. A changed default for any of
+them only reaches new installs.
+
+The kernel, Mesa and the NVIDIA driver stay at the versions the ISO was
+built with (a frozen backports snapshot and exact-version apt pins), so an
+update never changes them. Changing those still needs a new ISO.
+
+**Upgrading from 1.0.x:** there is no upgrade path. Cabinets installed from a
+1.0.x ISO need a fresh install from 1.1 or newer (back up your tables,
+`~/.config/vpinfe/` and `VPinballX.ini` first). After that, updates come
+through apt.
 
 ### Backports (kernel, Mesa, GPU firmware)
 
@@ -465,8 +492,8 @@ this same sequence.
 |------|------------|
 | `config/package-lists/` | Debian packages installed into the image |
 | `config/archives/` | apt preferences: kernel, Mesa and AMD firmware come from trixie-backports |
-| `config/hooks/live/` | Scripts run inside the image at build time (user creation, branding, installing vpinball/vpinfe, enabling services) |
-| `config/includes.chroot/` | Files copied verbatim into the image: the launcher and menu (`/usr/local/bin/`), Hyprland and systemd config, apt source and key, Calamares branding, `os-release` |
+| `config/hooks/live/` | Scripts run inside the image at build time (user creation, branding, installing vpinos-core/vpinball/vpinfe, NVIDIA driver, base services) |
+| `config/includes.chroot/` | Files copied verbatim into the image: apt source and key, Calamares branding, `os-release`, `base-version`. The menu, launcher, Hyprland config and units come from the `vpinos-core` package ([`vpinos/vpinos-packages`](https://github.com/vpinos/vpinos-packages)) |
 | `config/bootloaders/` | Boot splash and GRUB background artwork |
 | `Dockerfile` | The reproducible build environment |
 | `.github/workflows/build-iso.yml` | CI build and tag-triggered release |
