@@ -31,6 +31,33 @@
 # CONFIRMED via a real `lb build`: nvidia-kernel-open-dkms compiles
 # cleanly against this project's own pinned kernel
 # (7.1.13+deb13-amd64, from vpinos-backports.list).
+# Exact-version hold, ahead of the origin pin below because apt uses
+# the FIRST name-matching record for each version (and any name-matching
+# record beats a `Package: *` one, so this can't be a catch-all).
+# 0120-install-nvidia-driver.hook.chroot compiles the kernel modules
+# once at build time and purges DKMS -- the .ko files in
+# /lib/modules/<kver>/updates/dkms/ are owned by no package and can
+# never be rebuilt on a cabinet. NVIDIA's repo stays enabled on
+# installed systems, so without this hold a plain `apt upgrade` after
+# NVIDIA publishes a newer driver moves the userspace libraries (and
+# firmware-nvidia-gsp) ahead of the modules: kernel/userspace "API
+# mismatch", proprietary driver dead. Verified by simulating a newer
+# release against a real build's apt lists: candidate 615.80.01 without
+# this record, 615.71.09 with it.
+#
+# The regex also covers packages installed later on demand (libcuda1,
+# libnvidia-encode1 from vpinos-vr-setup.sh); the version match keeps it
+# off libnvidia-egl-* and friends, which have their own version numbers.
+# 1001 beats the 900 below, and -* allows NVIDIA repackaging revisions
+# of the same driver, which still match the modules.
+#
+# Bumping the driver: change this version and rebuild the ISO. The 0120
+# hook reads it back from here and fails the build if NVIDIA's repo no
+# longer serves it, so this can't silently stop matching anything.
+Package: /nvidia|^libcuda|^libnv/
+Pin: version 615.71.09-*
+Pin-Priority: 1001
+
 Package: nvidia-driver nvidia-kernel-open-dkms nvidia-kernel-common nvidia-kernel-support nvidia-smi libnvidia-* nvidia-settings nvidia-modprobe nvidia-persistenced nvidia-xconfig
 Pin: origin developer.download.nvidia.com
 Pin-Priority: 900

@@ -141,6 +141,19 @@ apt-get update
 # week.
 apt-get install -y linux-headers-7.1.13+deb13-amd64 build-essential dkms nvidia-driver nvidia-kernel-open-dkms
 
+# vpinos-nvidia-repo.pref holds every installed system at this one
+# driver version forever (the modules built here can never be rebuilt
+# on a cabinet). If NVIDIA's repo ever stops serving that version, apt
+# silently falls back to the newest one at the origin pin's priority,
+# and the image would ship a pin that matches nothing -- unpinned in
+# practice. Refuse to build instead; bump the pref file.
+pinned=$(sed -n 's/^Pin: version \(.*\)-\*$/\1/p' /etc/apt/preferences.d/vpinos-nvidia-repo.pref)
+built=$(dpkg-query -W -f='${Version}' nvidia-kernel-open-dkms | sed 's/-[^-]*$//')
+if [ -z "$pinned" ] || [ "$built" != "$pinned" ]; then
+    echo "E: built NVIDIA driver '$built' does not match vpinos-nvidia-repo.pref '$pinned'" >&2
+    exit 1
+fi
+
 kver=$(ls /lib/modules)
 backup_dir=/root/nvidia-module-backup
 mkdir -p "$backup_dir"
