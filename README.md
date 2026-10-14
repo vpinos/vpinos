@@ -109,7 +109,8 @@ live session                      installed system
 5) System Info (Debug)            5) Testing
 q) Quit to shell                  6) System Info (Debug)
 s) Shutdown                       q) Quit to shell
-                                  s) Shutdown
+r) Reboot                         s) Shutdown
+                                  r) Reboot
 ```
 
 "Update VPinOS" (installed systems only) runs the same full update as
@@ -412,21 +413,24 @@ through apt.
 
 ### Backports (kernel, Mesa, GPU firmware)
 
-The image (live and installed) has `trixie-backports` enabled alongside
-`trixie`, `trixie-updates` and `trixie-security`, all with the
-`main contrib non-free non-free-firmware` areas. An apt preference
-(`/etc/apt/preferences.d/vpinos-backports.pref`) makes the **kernel, Mesa and
-GPU firmware** follow backports, so `sudo apt upgrade` on an installed system
-brings newer versions of those as backports publishes them. Notes:
+The kernel (7.1), Mesa, GPU firmware and Hyprland come from
+`trixie-backports`, but from a **frozen snapshot**, not the live backports
+mirror. `/etc/apt/sources.list.d/vpinos-backports.list` points at one fixed
+[snapshot.debian.org](https://snapshot.debian.org/) date, and
+`/etc/apt/preferences.d/vpinos-backports.pref` prefers that snapshot for
+those packages. The kernel is also pinned by its exact package name
+(`linux-image-7.1.13+deb13-amd64`), and the NVIDIA driver by its exact version
+(`/etc/apt/preferences.d/vpinos-nvidia-repo.pref`). Notes:
 
-- **Reboot after a kernel update.** The previous kernel stays installed and
-  can be chosen from the GRUB menu if the new one misbehaves.
-- Everything else stays on trixie. Backports are opt-in in Debian, so to take
-  any other package from there, ask for it explicitly:
-  `sudo apt install -t trixie-backports <package>`.
-- Because those packages track backports, kernel/Mesa updates can change GPU
-  behavior between releases &mdash; if something regresses after an upgrade,
-  boot the older kernel from GRUB and report it.
+- **`sudo apt upgrade` does not move the kernel, Mesa, firmware or the NVIDIA
+  driver.** They stay at what the ISO was built and tested with. Everything
+  else follows normal trixie and trixie-security updates.
+- The snapshot replaced the live mirror because the live mirror's kernel
+  packages were caught mid-transition more than once, which broke builds.
+- Moving to a newer kernel or driver currently means a new ISO. Shipping
+  those through apt as well is planned for after 1.1.
+- Backports are opt-in in Debian. To take any other package from the
+  snapshot, ask for it explicitly: `sudo apt install -t trixie-backports <package>`.
 
 ## Security notes
 
