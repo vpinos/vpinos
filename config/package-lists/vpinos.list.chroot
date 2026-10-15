@@ -273,6 +273,16 @@ librsvg2-bin
 #      below (grub-efi-amd64 depends on it anyway, so nothing is lost).
 #if ARCHITECTURES amd64
 grub-efi-amd64
+# grub-pc-bin: GRUB's i386-pc (legacy BIOS) modules. The live ISO also
+# boots on BIOS/CSM machines (syslinux, see config/binary), and there
+# Calamares's bootloader module runs `grub-install --target=i386-pc`,
+# which fails with exit code 1 if /usr/lib/grub/i386-pc/ doesn't exist --
+# grub-efi-amd64 only ships x86_64-efi. Reported against v1.1 as "The
+# bootloader could not be installed ... grub-install --target=i386-pc
+# --recheck --force /dev/sda returned error code 1". The -bin package,
+# not grub-pc: grub-pc conflicts with grub-efi-amd64, grub-pc-bin
+# coexists with it.
+grub-pc-bin
 #endif
 #if ARCHITECTURES arm64
 grub-efi-arm64
