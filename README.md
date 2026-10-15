@@ -5,7 +5,7 @@
 <h1 align="center">VPinOS</h1>
 
 <p align="center">
-  A minimal, appliance-style Linux for virtual pinball cabinets.<br>
+  A minimal, appliance-style Linux for virtual pinball cabinets and desktop PCs.<br>
   Boots fast, brings up a GPU-accelerated display, and launches
   <a href="https://github.com/vpinball/vpinball">Visual Pinball</a> and the
   <strong>vpinfe</strong> frontend.<br>
@@ -31,7 +31,7 @@
 > menu, launcher and configuration tools, the kernel and the NVIDIA driver
 > all ship as packages. Pick **Update VPinOS** from the menu (or run
 > `sudo apt update && sudo apt upgrade`) to get every new release on an
-> installed cabinet. Your cabinet settings (monitor layout, boot mode, GPU
+> installed VPinOS system. Your settings (monitor layout, boot mode, GPU
 > driver choice, VPinFE settings) are never changed by an update.
 >
 > **Coming from 1.0.x?** Moving to v1.1 needs **one fresh install**; there is
@@ -62,7 +62,7 @@
 VPinOS is a custom Debian 13 (trixie) image, built with
 [live-build](https://live-team.pages.debian.net/live-manual/), that ships as
 a single hybrid ISO. It is **not** a general-purpose desktop. The whole point
-is a cabinet that goes from power-on to pinball with as little OS in the way
+is a machine that goes from power-on to pinball with as little OS in the way
 as possible:
 
 - **Base:** Debian trixie with `trixie-backports` enabled. The **Linux 7.1
@@ -74,10 +74,10 @@ as possible:
 - **Graphics:** open-source Mesa Vulkan drivers (AMD, Intel, NVIDIA via
   NVK) on the Linux 7.1 kernel, so VPinball's BGFX renderer runs with a
   real GPU.
-- **Apps:** `vpinball` and `vpinfe` (a cabinet frontend/launcher), plus
+- **Apps:** `vpinball` and `vpinfe` (a pinball frontend/launcher), plus
   Google Chrome for vpinfe's local UI.
 - **VR (optional):** play VPinball in a standalone headset
-  such as a Meta Quest 3, streamed from the cabinet with
+  such as a Meta Quest 3, streamed from the VPinOS machine with
   [WiVRn](https://github.com/WiVRn/WiVRn). Installed on demand from the
   menu, not part of the ISO. See [VR](#vr).
 - **Account:** one hardcoded appliance user, `vpinos` (password `vpinos`),
@@ -90,7 +90,7 @@ as possible:
 The same image runs two ways. Everything is identical except where it lives
 and whether changes survive a reboot.
 
-|                       | **Live** (boot the USB stick)                    | **Installed** (on the cabinet's disk)              |
+|                       | **Live** (boot the USB stick)                    | **Installed** (on the machine's disk)              |
 |-----------------------|--------------------------------------------------|----------------------------------------------------|
 | How you get it        | Write the ISO to a USB stick and boot it         | Run the installer from the live session ("Install VPinOS") |
 | Storage               | Read-only image, changes held in RAM             | Normal read-write install                          |
@@ -99,7 +99,7 @@ and whether changes survive a reboot.
 | Start the menu        | automatic on login                               | automatic on login                                 |
 | `sudo`                | Passwordless (live session default)              | Asks for the `vpinos` password, except the launcher the menu uses |
 | Updating VPinOS       | Not useful (lost at reboot) &mdash; use a newer ISO | Menu &rarr; Update VPinOS, or `sudo apt update && sudo apt upgrade` |
-| Good for              | Trying it, hardware checks, running the installer | Daily use on the cabinet                          |
+| Good for              | Trying it, hardware checks, running the installer | Daily use                                         |
 
 The **live** session is the way to try VPinOS on a machine without touching
 its disks. To make it permanent, pick **Install VPinOS** from
@@ -130,7 +130,7 @@ r) Reboot                         s) Shutdown
 `sudo apt update && sudo apt upgrade`, right in the console, then restarts
 the menu. See [Updates](#updates).
 
-"Setup" groups everything that configures the cabinet rather than runs it:
+"Setup" groups everything that configures the system rather than runs it:
 
 ```
 1) GPU Driver: default
@@ -164,11 +164,11 @@ controller-mapping mode.
 
 "Boot on startup" (installed systems only — not shown on the live image) lets
 you pick a program to launch automatically on boot instead of this menu, e.g.
-VPinFE for a cabinet that should go straight to the frontend. Quitting that
+VPinFE for a setup that should go straight to the frontend. Quitting that
 program (or it exiting for any other reason) always falls back to this menu,
 never a dead end.
 
-"Testing" groups things you run to try the cabinet out, rather than
+"Testing" groups things you run to try the system out, rather than
 configure it:
 
 ```
@@ -176,11 +176,11 @@ configure it:
 2) VPinFE       (live session only)
 ```
 
-VPinFE itself — the cabinet's table-browsing frontend — is tucked into
+VPinFE itself — the table-browsing frontend — is tucked into
 Testing on the live session (there's nowhere else to reach it from), but
 promoted to its own top-level option on an installed system: that's the one
-a cabinet builder reaches for constantly once it's actually built, so it
-doesn't sit a menu level down from day-to-day use.
+you reach for constantly in day-to-day use, so it doesn't sit a menu level
+down.
 
 "GPU Driver" switches between the open-source driver this image uses by
 default (Mesa/NVK on NVIDIA hardware, RADV on AMD, Intel's own driver) and
@@ -284,7 +284,7 @@ NVIDIA's **615.71.09** driver from NVIDIA's own apt repository, using
 NVIDIA's open-source kernel module (NVIDIA no longer ships the closed one
 on this driver branch). The kernel module comes prebuilt for the exact
 VPinOS kernel (package `vpinos-nvidia-modules-<kernel>`), so nothing is
-compiled on your cabinet, and newer tested driver versions arrive through
+compiled on your machine, and newer tested driver versions arrive through
 the normal update (see [Updates](#updates)). That open kernel
 module supports Turing and newer GPUs:
 
@@ -306,21 +306,21 @@ investigation history.
 
 VPinOS can stream VPinball to a standalone VR headset, such as a
 **Meta Quest 3**, using [WiVRn](https://github.com/WiVRn/WiVRn). VPinball
-renders the table through OpenXR on the cabinet's GPU, and WiVRn encodes it
+renders the table through OpenXR on the PC's GPU, and WiVRn encodes it
 and sends it to the headset over **USB** or **Wi-Fi**. It has been
 confirmed working on real hardware by testers; if you hit a problem, please
 [report it](../../issues).
 
 Nothing VR-related is in the ISO. Everything is installed on demand from
-the menu, so cabinets without a headset don't carry it.
+the menu, so installations without a headset don't carry it.
 
 ### Setting it up
 
 1. **Headset:** turn on **Developer Mode** for the headset (Meta Horizon
    phone app), and install the **WiVRn app** on it. The app's version must
-   **match the WiVRn version on the cabinet**, which VR &rarr; Setup shows
+   **match the WiVRn version on the VPinOS machine**, which VR &rarr; Setup shows
    once installed.
-2. **Cabinet:** `vpinos-menu` &rarr; **VR** &rarr; **Setup** &rarr;
+2. **VPinOS machine:** `vpinos-menu` &rarr; **VR** &rarr; **Setup** &rarr;
    **Install VR components**. This needs a network connection. It installs
    WiVRn and xrizer (from the VPinOS apt repository), adb, and the video
    encoder libraries that match your GPU.
@@ -359,7 +359,7 @@ Encoder: nvenc   VPX VR: off
 - **Over USB:** plug the headset in, accept the "Allow USB debugging"
   prompt inside it the first time, then use **Connect headset over USB**.
   That starts the WiVRn app on the headset and connects it.
-- **Over Wi-Fi:** the headset finds the cabinet by itself on the same
+- **Over Wi-Fi:** the headset finds the VPinOS machine by itself on the same
   network. A new headset has to be paired once: **Pair new headset**, then
   enter the PIN shown when the headset asks.
 - **WiVRn Dashboard** opens WiVRn's own settings app (starting the VR
@@ -411,7 +411,7 @@ Debian security updates, with no reinstall. Use `apt upgrade`, not
 back an update that adds a dependency. A newly built ISO always contains
 whatever is currently published.
 
-**Your cabinet's settings are never touched by an update:**
+**Your settings are never touched by an update:**
 `/etc/vpinos/hyprland.conf` (including the monitor layout set in VPinOS
 Configuration), `/etc/vpinos/hyprland-installer.conf`, the boot mode and GPU
 driver choices, and `~/.config/vpinfe/` (settings and theme) are written
@@ -428,7 +428,7 @@ afterwards. If you update by hand rather than from the menu, run
 the first run installs the new pins, the second the new kernel/driver. The
 previous kernel stays in the GRUB menu as a fallback.
 
-**Upgrading from 1.0.x:** there is no upgrade path. Cabinets installed from a
+**Upgrading from 1.0.x:** there is no upgrade path. Systems installed from a
 1.0.x ISO need a fresh install from 1.1 or newer (back up your tables,
 `~/.config/vpinfe/` and `VPinballX.ini` first). After that, updates come
 through apt.
@@ -451,16 +451,16 @@ those packages. The kernel is also pinned by its exact package name
 - The snapshot replaced the live mirror because the live mirror's kernel
   packages were caught mid-transition more than once, which broke builds.
 - The NVIDIA kernel modules come prebuilt for the exact kernel
-  (`vpinos-nvidia-modules-<kernel>`), so a cabinet never needs DKMS or a
+  (`vpinos-nvidia-modules-<kernel>`), so an installation never needs DKMS or a
   compiler.
 - Backports are opt-in in Debian. To take any other package from the
   snapshot, ask for it explicitly: `sudo apt install -t trixie-backports <package>`.
 
 ## Security notes
 
-VPinOS is a single-purpose cabinet image and ships with a **known default
+VPinOS is a single-purpose pinball image and ships with a **known default
 password** (`vpinos` / `vpinos`) and an **SSH server** installed for remote
-maintenance. On any cabinet that is reachable from a network, change the
+maintenance. On any VPinOS installation that is reachable from a network, change the
 password after installing (`passwd`), and don't expose it to the internet.
 
 ## Building from source
@@ -497,7 +497,7 @@ docker run --rm --ulimit nofile=65536:65536 -v "$PWD:/work" -w /work vpinos-buil
 # whatever a hook deletes. Nothing at runtime needs it --
 # network-manager + systemd-timesyncd are already present, so
 # `apt-get update` works normally the first time anyone installs
-# something on a real cabinet. See notes/vpinos.md for the full story.
+# something on a real installation. See notes/vpinos.md for the full story.
 
 # Fix ownership of the generated config only -- never `chown -R` the whole
 # project: it corrupts cache/bootstrap and the built image ends up with its
@@ -533,6 +533,6 @@ are not committed.
 
 **Beta.** Early and actively developed. The build, live boot, launch path
 (Hyprland &rarr; vpinball / vpinfe) and installer are working end to end.
-Booting straight into the frontend on an installed cabinet is now
+Booting straight into the frontend on an installed system is now
 opt-in ("Boot on startup"). Still ahead: persistence for the live medium, and
 narrowing GPU/firmware support once the target hardware is settled.
