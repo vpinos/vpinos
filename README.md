@@ -26,6 +26,19 @@
   <a href="https://discord.com/channels/652274650524418078/1555201704574582844"><strong>Join the Discord channel</strong></a>
 </p>
 
+> [!IMPORTANT]
+> **From v1.1 on, VPinOS updates itself, so you won't need a new ISO.** The
+> menu, launcher and configuration tools, the kernel and the NVIDIA driver
+> all ship as packages. Pick **Update VPinOS** from the menu (or run
+> `sudo apt update && sudo apt upgrade`) to get every new release on an
+> installed cabinet. Your cabinet settings (monitor layout, boot mode, GPU
+> driver choice, VPinFE settings) are never changed by an update.
+>
+> **Coming from 1.0.x?** Moving to v1.1 needs **one fresh install**; there is
+> no in-place upgrade from 1.0.x. Back up your tables, `~/.config/vpinfe/` and
+> `~/.local/share/VPinballX/10.8/VPinballX.ini` first. After that, every
+> update comes through the menu. See [Updates](#updates).
+
 > [!WARNING]
 > **VPinOS is in beta.** It works end to end (boot, launch, install), but it
 > is under active development: expect rough edges, breaking changes between
@@ -264,12 +277,15 @@ Prebuilt ISOs are published on the
 ### NVIDIA video card support
 
 Besides the open-source NVK driver above (the default, no install needed),
-VPinOS can also precompile NVIDIA's **proprietary** driver at build time and
-let you switch to it at runtime from the console menu (`vpinos-menu` &rarr;
-"GPU Driver" &rarr; "NVIDIA proprietary"). As of the current image, this is
-NVIDIA's **615.71.09** driver from NVIDIA's own apt repository, built against
-the open-source `nvidia-kernel-open-dkms` kernel module (NVIDIA no longer
-ships the closed kernel module on this driver branch). That open kernel
+every amd64 VPinOS install also carries NVIDIA's **proprietary** driver, and
+you can switch to it at runtime from the console menu (`vpinos-menu` &rarr;
+"GPU Driver" &rarr; "NVIDIA proprietary"). It's off unless you pick it. It is
+NVIDIA's **615.71.09** driver from NVIDIA's own apt repository, using
+NVIDIA's open-source kernel module (NVIDIA no longer ships the closed one
+on this driver branch). The kernel module comes prebuilt for the exact
+VPinOS kernel (package `vpinos-nvidia-modules-<kernel>`), so nothing is
+compiled on your cabinet, and newer tested driver versions arrive through
+the normal update (see [Updates](#updates)). That open kernel
 module supports Turing and newer GPUs:
 
 | Architecture       | Year | GeForce series                          |
@@ -402,9 +418,15 @@ driver choices, and `~/.config/vpinfe/` (settings and theme) are written
 once, at install, and left alone after that. A changed default for any of
 them only reaches new installs.
 
-The kernel, Mesa and the NVIDIA driver stay at the versions the ISO was
-built with (a frozen backports snapshot and exact-version apt pins), so an
-update never changes them. Changing those still needs a new ISO.
+The kernel, Mesa and the NVIDIA driver are held at fixed versions by a frozen
+backports snapshot and exact-version apt pins, so a normal update never
+changes them by accident. When VPinOS moves to a newer kernel or NVIDIA
+driver, that arrives through the same update as well (packages
+`vpinos-platform`, `vpinos-kernel` and the prebuilt NVIDIA modules). Reboot
+afterwards. If you update by hand rather than from the menu, run
+`sudo apt update && sudo apt upgrade` **twice** after a kernel/driver release:
+the first run installs the new pins, the second the new kernel/driver. The
+previous kernel stays in the GRUB menu as a fallback.
 
 **Upgrading from 1.0.x:** there is no upgrade path. Cabinets installed from a
 1.0.x ISO need a fresh install from 1.1 or newer (back up your tables,
@@ -423,12 +445,14 @@ those packages. The kernel is also pinned by its exact package name
 (`/etc/apt/preferences.d/vpinos-nvidia-repo.pref`). Notes:
 
 - **`sudo apt upgrade` does not move the kernel, Mesa, firmware or the NVIDIA
-  driver.** They stay at what the ISO was built and tested with. Everything
-  else follows normal trixie and trixie-security updates.
+  driver on its own.** They only change when VPinOS publishes a new
+  `vpinos-platform`/`vpinos-kernel` (see [Updates](#updates)). Everything else
+  follows normal trixie and trixie-security updates.
 - The snapshot replaced the live mirror because the live mirror's kernel
   packages were caught mid-transition more than once, which broke builds.
-- Moving to a newer kernel or driver currently means a new ISO. Shipping
-  those through apt as well is planned for after 1.1.
+- The NVIDIA kernel modules come prebuilt for the exact kernel
+  (`vpinos-nvidia-modules-<kernel>`), so a cabinet never needs DKMS or a
+  compiler.
 - Backports are opt-in in Debian. To take any other package from the
   snapshot, ask for it explicitly: `sudo apt install -t trixie-backports <package>`.
 
@@ -496,7 +520,7 @@ this same sequence.
 |------|------------|
 | `config/package-lists/` | Debian packages installed into the image |
 | `config/archives/` | apt preferences: kernel, Mesa and AMD firmware come from trixie-backports |
-| `config/hooks/live/` | Scripts run inside the image at build time (user creation, branding, installing vpinos-core/vpinball/vpinfe, NVIDIA driver, base services) |
+| `config/hooks/live/` | Scripts run inside the image at build time (user creation, branding, adding NVIDIA's apt repo, installing vpinos-core/vpinball/vpinfe, base services) |
 | `config/includes.chroot/` | Files copied verbatim into the image: apt source and key, Calamares branding, `os-release`, `base-version`. The menu, launcher, Hyprland config and units come from the `vpinos-core` package ([`vpinos/vpinos-packages`](https://github.com/vpinos/vpinos-packages)) |
 | `config/bootloaders/` | Boot splash and GRUB background artwork |
 | `Dockerfile` | The reproducible build environment |

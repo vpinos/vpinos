@@ -19,32 +19,89 @@ chown root:root /etc/apt/keyrings /etc/apt/sources.list.d \
 chmod 0755 /etc/apt/keyrings /etc/apt/sources.list.d
 chmod 0644 /etc/apt/keyrings/vpinos.asc /etc/apt/sources.list.d/vpinos.list
 
+# NVIDIA's apt repository (amd64 only): vpinos-kernel pulls in
+# vpinos-nvidia-modules, which holds the NVIDIA userspace at an exact
+# version from that repo, so the repo has to exist before vpinos-core is
+# installed. cuda-keyring is NVIDIA's own package for the source line and
+# key; config/archives/vpinos-nvidia-repo.pref pins what comes from it.
+# NVIDIA's arm64 driver is Jetson/Tegra only, outside this project's scope.
+if [ "$(dpkg --print-architecture)" = amd64 ]; then
+    workdir=$(mktemp -d)
+    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb" \
+        -o "$workdir/cuda-keyring.deb"
+    dpkg -i "$workdir/cuda-keyring.deb"
+    rm -rf "$workdir"
+fi
+
 apt-get update
 
 # vpinos-core: the menu, launcher, config tool, helpers, sudoers rules,
 # units and default cabinet config -- everything VPinOS-specific that
 # used to live in includes.chroot, now a package so installed cabinets
 # get changes through apt (built in github.com/vpinos/vpinos-packages,
-# see notes/vpinos-core-update-plan.md). Installed here, after
-# 0060-create-vpinos-user.hook.chroot, because its postinst places the
-# defaults that belong to the `vpinos` user. Its preinst checks
-# /usr/share/vpinos/base-version (includes.chroot) and refuses anything
-# older than the image it was built for.
+# see notes/vpinos-core-update-plan.md). It depends on vpinos-platform
+# (the apt pins) and vpinos-kernel (the exact kernel, plus on amd64 the
+# prebuilt NVIDIA modules, vpinos-nvidia-modules-<kernel>) -- so kernel
+# and driver upgrades also reach cabinets through apt (see the
+# upgrade-kernel-nvidia skill). Installed here, after 0060-create-vpinos-user.hook.chroot,
+# because vpinos-core's postinst places the defaults that belong to the
+# `vpinos` user. Its preinst checks /usr/share/vpinos/base-version
+# (includes.chroot) and refuses anything older than the image it was
+# built for.
 #
-# Local test builds only: a vpinos-core .deb dropped into
-# config/includes.chroot/var/cache/vpinos-local-debs/ (gitignored) is
-# installed instead of the published one -- for testing an unreleased
-# package in an ISO. Not config/packages.chroot: live-build installs
-# those before the hooks run, before the `vpinos` user and this apt
-# source (needed for vpinball/vpinfe) exist.
-# vpinos-core is left out of the final install when a local copy went
-# in, or apt would "upgrade" it straight to the published version.
+# Local test builds only: .debs dropped into
+# config/includes.chroot/var/cache/vpinos-local-debs/ (gitignored) are
+# installed instead of the published ones -- for testing unreleased
+# packages in an ISO. Only this architecture's (and arch "all") debs are
+# used. Not config/packages.chroot: live-build installs those before the
+# hooks run, before the `vpinos` user and these apt sources exist.
+arch=$(dpkg --print-architecture)
 local_debs=/var/cache/vpinos-local-debs
-core=vpinos-core
+local_installed=
 if ls "$local_debs"/*.deb >/dev/null 2>&1; then
-    echo "I: installing local test packages: $(ls "$local_debs")"
-    apt-get install -y "$local_debs"/*.deb
+    debs=
+    for deb in "$local_debs"/*.deb; do
+        case "$(dpkg-deb -f "$deb" Architecture)" in
+            "$arch"|all) debs="$debs $deb"
+                         local_installed="$local_installed $(dpkg-deb -f "$deb" Package)" ;;
+        esac
+    done
+    echo "I: installing local test packages:$debs"
+    # shellcheck disable=SC2086
+    apt-get install -y $debs
     rm -rf "$local_debs"
-    core=
 fi
-apt-get install -y $core vpinball vpinfe vpxconfig
+
+# The apt pins as config/archives put them into this build, before
+# vpinos-platform rewrites them with its own copies (see below).
+pins="/etc/apt/sources.list.d/vpinos-backports.list /etc/apt/preferences.d/vpinos-backports.pref /etc/apt/preferences.d/vpinos-nvidia-repo.pref"
+pins_before=$(cat $pins | sha256sum)
+
+# A package already installed from a local test .deb is left out, or
+# apt would "upgrade" it straight to the published version.
+pkgs=
+for p in vpinos-core vpinball vpinfe vpxconfig; do
+    case " $local_installed " in
+        *" $p "*) ;;
+        *) pkgs="$pkgs $p" ;;
+    esac
+done
+# shellcheck disable=SC2086
+apt-get install -y $pkgs
+
+# config/archives (used to build this image, before any of our packages
+# exist) and vpinos-platform (what cabinets keep afterwards) must carry
+# the same pins, and the kernel in vpinos.list.chroot must be the one
+# vpinos-platform wants. Either mismatch means a kernel/driver bump was
+# done in one repo but not the other -- refuse to build an image that
+# would change itself on its first `apt upgrade`. (vpinos-platform's
+# postinst rewrites these files, so any difference shows up here.)
+if [ "$(cat $pins | sha256sum)" != "$pins_before" ]; then
+    echo "E: config/archives pins differ from vpinos-platform $(dpkg-query -W -f='${Version}' vpinos-platform)'s -- update one to match the other" >&2
+    exit 1
+fi
+kernels=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | awk '$1 == "ii" { print $2 }')
+if [ "$(echo "$kernels" | wc -l)" -ne 1 ]; then
+    echo "E: expected exactly one kernel, found: $(echo $kernels) -- vpinos.list.chroot and vpinos-platform disagree" >&2
+    exit 1
+fi
