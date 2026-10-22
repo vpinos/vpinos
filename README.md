@@ -133,12 +133,13 @@ the menu. See [Updates](#updates).
 "Setup" groups everything that configures the system rather than runs it:
 
 ```
-1) GPU Driver: default
-2) VPinOS Configuration
-3) Network Settings
-4) VPXConfig (Advanced VPinball Configuration)
-5) VPinFE Map Controls
-6) Boot on startup: menu       (installed systems only)
+1) Console Rotation: normal
+2) GPU Driver: default
+3) VPinOS Configuration
+4) Network Settings
+5) VPXConfig (Advanced VPinball Configuration)
+6) VPinFE Map Controls
+7) Boot on startup: menu       (installed systems only)
 ```
 
 "VPinOS Configuration" (`vpinos-config` — was "Monitor Detection" until it
