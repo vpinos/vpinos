@@ -1,0 +1,25 @@
+label live-@FLAVOUR@
+	menu label ^Live system (@FLAVOUR@)
+	menu default
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE@
+
+# VPinOS: the same live boot, with the settings saved on the USB stick
+# (vpinos-core's vpinos-persistence.sh makes the vpinos-data partition
+# on the first boot). Not the default: the menu has no timeout, so it's
+# picked each time. Same entry in grub-pc/grub.cfg for UEFI. Copied
+# from live-build's own syslinux_common/live.cfg.in (1:20250505+deb13u1),
+# which it otherwise replaces: keep the rest in step when live-build
+# changes.
+label live-@FLAVOUR@-persistence
+	menu label Live system (@FLAVOUR@, ^save settings to USB)
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE@ persistence persistence-label=vpinos-data
+
+label live-@FLAVOUR@-failsafe
+	menu label Live system (@FLAVOUR@ fail-safe mode)
+	linux @LINUX@
+	initrd @INITRD@
+	append @APPEND_LIVE_FAILSAFE@

@@ -94,7 +94,7 @@ and whether changes survive a reboot.
 |-----------------------|--------------------------------------------------|----------------------------------------------------|
 | How you get it        | Write the ISO to a USB stick and boot it         | Run the installer from the live session ("Install VPinOS") |
 | Storage               | Read-only image, changes held in RAM             | Normal read-write install                          |
-| Changes persist?      | **No** &mdash; everything resets on reboot       | Yes                                                |
+| Changes persist?      | **No** &mdash; everything resets on reboot, unless you boot "save settings to USB" ([below](#saving-settings-on-the-live-usb)) | Yes |
 | Login                 | Console autologin as `vpinos` on tty1            | Console autologin as `vpinos` on tty1              |
 | Start the menu        | automatic on login                               | automatic on login                                 |
 | `sudo`                | Passwordless (live session default)              | Asks for the `vpinos` password, except the launcher the menu uses |
@@ -104,6 +104,35 @@ and whether changes survive a reboot.
 The **live** session is the way to try VPinOS on a machine without touching
 its disks. To make it permanent, pick **Install VPinOS** from
 the menu and follow the prompts (language, keyboard, partitioning, summary).
+
+### Saving settings on the live USB
+
+To keep your settings on the stick across reboots, pick
+**Live system (amd64, save settings to USB)** at the boot menu. The first
+time, VPinOS makes a partition (`vpinos-data`) in all the free space on the
+stick after the image, before the menu comes up. From then on, booting the
+same entry brings back:
+
+- VPinOS Configuration (screens, table rotation), Console Rotation, GPU
+  Driver and Boot on startup (`/etc/vpinos`)
+- VPinball and VPinFE settings, and your tables (`/home/vpinos`)
+- Wi-Fi and other network connections
+
+Pick that entry on every boot: the boot menu waits, and the normal
+**Live system** entry starts without the saved settings (and doesn't touch
+them). The main menu says whether settings are being saved, and why not if
+they aren't. **Tools &rarr; Reset Saved Settings** clears them and reboots.
+
+Good to know:
+
+- It needs a stick written from the ISO as in [Using an ISO](#using-an-iso)
+  (dd, balenaEtcher, or Rufus in DD mode) with at least 1 GB free after the
+  image. Ventoy, Rufus's ISO mode, a DVD or a virtual machine's CD don't
+  have room for it; the menu says so.
+- Only settings are kept, not installed software: VR components, VPX Editor
+  and updates are still lost at reboot. Install VPinOS for those.
+- Writing the ISO to the stick again removes the saved settings.
+- Settings saved on the stick aren't copied when you install VPinOS from it.
 
 ### The menu
 
@@ -139,7 +168,7 @@ the menu. See [Updates](#updates).
 4) Network Settings
 5) VPXConfig (Advanced VPinball Configuration)
 6) VPinFE Map Controls
-7) Boot on startup: menu       (installed systems only)
+7) Boot on startup: menu       (installed, or live with saved settings)
 ```
 
 "VPinOS Configuration" (`vpinos-config` — was "Monitor Detection" until it
@@ -163,7 +192,8 @@ click its own Quit button).
 "VPinFE Map Controls" runs `vpinfe --gamepadtest`, vpinfe's own
 controller-mapping mode.
 
-"Boot on startup" (installed systems only — not shown on the live image) lets
+"Boot on startup" (installed systems, or a live USB that
+[saves its settings](#saving-settings-on-the-live-usb)) lets
 you pick a program to launch automatically on boot instead of this menu, e.g.
 VPinFE for a setup that should go straight to the frontend. Quitting that
 program (or it exiting for any other reason) always falls back to this menu,
