@@ -126,9 +126,12 @@ they aren't. **Tools &rarr; Reset Saved Settings** clears them and reboots.
 Good to know:
 
 - It needs a stick written from the ISO as in [Using an ISO](#using-an-iso)
-  (dd, balenaEtcher, or Rufus in DD mode) with at least 1 GB free after the
-  image. Ventoy, Rufus's ISO mode, a DVD or a virtual machine's CD don't
-  have room for it; the menu says so.
+  (dd, balenaEtcher, or Rufus in **DD Image mode**) with at least 1 GB free
+  after the image. Rufus's default ISO Image mode formats the whole stick
+  as one FAT32 partition and copies the files onto it, so there's no free
+  space left, and the settings can't go on the partition VPinOS boots from.
+  Write the stick again in DD mode. Ventoy, a DVD or a virtual machine's CD
+  can't save settings either. The menu says which case applies.
 - Only settings are kept, not installed software: VR components, VPX Editor
   and updates are still lost at reboot. Install VPinOS for those.
 - Writing the ISO to the stick again removes the saved settings.
@@ -257,6 +260,8 @@ Prebuilt ISOs are published on the
    sudo dd if=live-image-amd64.hybrid.iso of=/dev/sdX bs=4M status=progress conv=fsync
    ```
    or use a tool such as balenaEtcher. Double-check `/dev/sdX` first.
+   With **Rufus**, pick **DD Image mode** when it asks: its default ISO
+   Image mode boots, but can't [save settings](#saving-settings-on-the-live-usb).
 3. Boot the target machine from the stick. The image carries both BIOS
    (syslinux) and UEFI (GRUB) boot files.
 4. Run `vpinos-menu`. To install, choose "Install VPinOS".
