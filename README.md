@@ -132,7 +132,7 @@ Good to know:
   space left, and the settings can't go on the partition VPinOS boots from.
   Write the stick again in DD mode. Ventoy, a DVD or a virtual machine's CD
   can't save settings either. The menu says which case applies.
-- Only settings are kept, not installed software: VR components, VPX Editor
+- Only settings are kept, not installed software: VR components, VPX Editor, vpxtool
   and updates are still lost at reboot. Install VPinOS for those.
 - Writing the ISO to the stick again removes the saved settings.
 - Settings saved on the stick aren't copied when you install VPinOS from it.
@@ -226,7 +226,8 @@ testing.
 ```
 1) System Info (Debug)
 2) VPX Editor
-3) Reset Saved Settings   (live USB that saves its settings only)
+3) vpxtool
+4) Reset Saved Settings   (live USB that saves its settings only)
 ```
 
 "System Info (Debug)" shows the VPinOS version, the video driver and the
@@ -239,6 +240,15 @@ amd64-only and isn't in the image (about a 530 MB download), so the first
 time you pick it the menu offers to install it, which needs internet. On a
 live USB it's gone again after a reboot, even one that saves its settings:
 those keep your settings and files, not installed programs.
+
+"vpxtool" opens a command prompt in your tables folder with
+[vpxtool](https://github.com/francisdb/vpxtool), a command-line tool for
+`.vpx` files: show a table's info or ROM name, check a file, extract or
+compare its script, unpack it. The menu lists the common commands, and
+`vpxtool --help` lists them all. Type `exit` to go back to the menu. Like
+VPX Editor it isn't in the image, so the first time you pick it the menu
+offers to install it (about 6 MB, needs internet), and on a live USB it's
+gone after a reboot. It works on amd64 and arm64.
 
 "Reset Saved Settings" appears only on a live USB that
 [saves its settings](#saving-settings-on-the-live-usb). After you confirm,
