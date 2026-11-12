@@ -132,8 +132,8 @@ Good to know:
   space left, and the settings can't go on the partition VPinOS boots from.
   Write the stick again in DD mode. Ventoy, a DVD or a virtual machine's CD
   can't save settings either. The menu says which case applies.
-- Only settings are kept, not installed software: VR components, VPX Editor, vpxtool
-  and updates are still lost at reboot. Install VPinOS for those.
+- Only settings are kept, not installed software: VR components, VPX Editor, vpxtool,
+  Pinscape-Cross and updates are still lost at reboot. Install VPinOS for those.
 - Writing the ISO to the stick again removes the saved settings.
 - Settings saved on the stick aren't copied when you install VPinOS from it.
 
@@ -227,7 +227,8 @@ testing.
 1) System Info (Debug)
 2) VPX Editor
 3) vpxtool
-4) Reset Saved Settings   (live USB that saves its settings only)
+4) Pinscape-Cross
+5) Reset Saved Settings   (live USB that saves its settings only)
 ```
 
 "System Info (Debug)" shows the VPinOS version, the video driver and the
@@ -249,6 +250,15 @@ compare its script, unpack it. The menu lists the common commands, and
 VPX Editor it isn't in the image, so the first time you pick it the menu
 offers to install it (about 6 MB, needs internet), and on a live USB it's
 gone after a reboot. It works on amd64 and arm64.
+
+"Pinscape-Cross" opens [Pinscape-Cross](https://github.com/superhac/pinscape-cross)
+in a window: the configuration tool for a Pinscape Pico controller board,
+including its firmware updates. Plug the board in over USB; no extra setup
+is needed for VPinOS to reach it. Like VPX Editor it's amd64-only and isn't
+in the image, so the first time you pick it the menu offers to install it,
+which needs internet. It's a small download itself, but it brings the
+WebKitGTK libraries it needs along with it, up to about 180 MB in all. On a
+live USB it's gone after a reboot.
 
 "Reset Saved Settings" appears only on a live USB that
 [saves its settings](#saving-settings-on-the-live-usb). After you confirm,
