@@ -151,8 +151,8 @@ live session                      installed system
 2) Testing                        2) VPinFE
 3) VR                             3) VR
 4) Install VPinOS                 4) Update VPinOS
-5) System Info (Debug)            5) Testing
-q) Quit to shell                  6) System Info (Debug)
+5) Tools                          5) Testing
+q) Quit to shell                  6) Tools
 s) Shutdown                       q) Quit to shell
 r) Reboot                         s) Shutdown
                                   r) Reboot
@@ -207,7 +207,8 @@ configure it:
 
 ```
 1) Launch VPinball Example Table
-2) VPinFE       (live session only)
+2) VPinFE                             (live session only)
+3) SSH Password Authentication: off   (live session only)
 ```
 
 VPinFE itself — the table-browsing frontend — is tucked into
@@ -215,6 +216,33 @@ Testing on the live session (there's nowhere else to reach it from), but
 promoted to its own top-level option on an installed system: that's the one
 you reach for constantly in day-to-day use, so it doesn't sit a menu level
 down.
+
+"SSH Password Authentication" (live session only) turns password logins
+over SSH on or off, for reaching a live session from another machine while
+testing.
+
+"Tools" holds the utilities that aren't part of setting up or playing:
+
+```
+1) System Info (Debug)
+2) VPX Editor
+3) Reset Saved Settings   (live USB that saves its settings only)
+```
+
+"System Info (Debug)" shows the VPinOS version, the video driver and the
+GPUs it detected, display, CPU, memory and sound devices. It also saves the
+same report as a timestamped text file in the `vpinos` home directory, so
+you can attach it to a bug report or read it over SSH.
+
+"VPX Editor" opens the Visual Pinball table editor in a window. It's
+amd64-only and isn't in the image (about a 530 MB download), so the first
+time you pick it the menu offers to install it, which needs internet. On a
+live USB it's gone again after a reboot, even one that saves its settings:
+those keep your settings and files, not installed programs.
+
+"Reset Saved Settings" appears only on a live USB that
+[saves its settings](#saving-settings-on-the-live-usb). After you confirm,
+it clears everything saved on the stick and reboots.
 
 "GPU Driver" switches between the open-source driver this image uses by
 default (Mesa/NVK on NVIDIA hardware, RADV on AMD, Intel's own driver) and
