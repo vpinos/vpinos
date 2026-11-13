@@ -22,6 +22,39 @@ set -e
 # both copies.
 apt-get purge -y firmware-netronome firmware-nvidia-tesla-535-gsp firmware-marvell-prestera
 
+# nouveau's older GSP firmware set (firmware-nvidia-graphics). The 7.1
+# kernel's nouveau knows two GSP versions, 535.113.01 and 570.144 (both
+# in `modinfo -F firmware nouveau`), and the package ships both; nouveau
+# uses 570.144 when it's there. Dropping the 535 set saves ~37 MiB in the
+# squashfs, the room the NVIDIA legacy driver needs to keep the ISO under
+# GitHub's 2 GiB limit (notes/nvidia-legacy-plan.md 6.1). Some 570.144
+# names are symlinks to 535.113.01 files (e.g. tu102/gsp/
+# bootloader-570.144.bin -> bootloader-535.113.01.bin), so every file a
+# 570.144 name resolves to is kept -- worked out here, not from a fixed
+# list, so a firmware-nvidia-graphics update can't break it. Not an apt
+# purge: the package is needed, only these files go. (Installed systems
+# get them back on a firmware-nvidia-graphics upgrade; harmless, it's
+# only the ISO that has a size limit.)
+fw=/usr/lib/firmware/nvidia
+if [ -d "$fw" ]; then
+    keep=$(find "$fw" -name '*-570.144.bin*' -exec readlink -f {} \; | sort -u)
+    removed=0
+    for f in $(find "$fw" -type f -path '*/gsp/*' -name '*-535.113.01.bin*'); do
+        if ! printf '%s\n' "$keep" | grep -qxF "$(readlink -f "$f")"; then
+            rm -f "$f"
+            removed=$((removed + 1))
+        fi
+    done
+    # 535.113.01 names that pointed at a removed file.
+    find "$fw" -xtype l -name '*-535.113.01.bin*' -delete
+    echo "I: removed $removed nouveau gsp-535.113.01 firmware files"
+    dangling=$(find "$fw" -xtype l -name '*-570.144.bin*')
+    if [ -n "$dangling" ]; then
+        echo "E: GSP firmware trim broke 570.144 links: $dangling" >&2
+        exit 1
+    fi
+fi
+
 # "Possible missing firmware ... for module nfp" warnings are expected and
 # harmless (no such hardware).
 update-initramfs -u -k all

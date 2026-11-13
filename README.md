@@ -264,15 +264,21 @@ live USB it's gone after a reboot.
 [saves its settings](#saving-settings-on-the-live-usb). After you confirm,
 it clears everything saved on the stick and reboots.
 
-"GPU Driver" switches between the open-source driver this image uses by
-default (Mesa/NVK on NVIDIA hardware, RADV on AMD, Intel's own driver) and
-the NVIDIA proprietary driver, precompiled into the image at build time.
-Takes effect on the very next launch — no reboot needed, live or installed.
-Confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
-multiple testers, and **recommended on NVIDIA cards**: testers report poor
-pinball performance with NVK. NVK/nouveau stays the default because it
-needs no setup, and it's the only option for cards older than Turing,
-which the proprietary driver here doesn't support.
+"GPU Driver" picks one of three drivers:
+
+- **Default**: the open-source drivers (Mesa/NVK on NVIDIA hardware, RADV
+  on AMD, Intel's own driver).
+- **NVIDIA proprietary**: NVIDIA's current driver, for RTX 20/GTX 16 and
+  newer.
+- **NVIDIA legacy**: NVIDIA's 580 driver, for GTX 750 to 10-series and
+  Titan V (Maxwell, Pascal, Volta).
+
+Both NVIDIA drivers are precompiled into the image. A change takes effect
+on the very next launch, live or installed, with no reboot. On NVIDIA cards
+the matching NVIDIA driver is **recommended**: testers report poor pinball
+performance with NVK. NVK/nouveau stays the default because it needs no
+setup. Both NVIDIA drivers need Secure Boot turned off. See
+[NVIDIA video card support](#nvidia-video-card-support).
 
 "VR" streams VPinball to a standalone VR headset. See
 [VR](#vr) below.
@@ -326,18 +332,16 @@ Prebuilt ISOs are published on the
   - **NVIDIA** &mdash; the open-source NVK driver (Mesa) with NVIDIA's GPU
     firmware, for Turing (RTX 16/20-series) and newer cards. It runs on
     real NVIDIA hardware, but testers report **poor performance** with it
-    for pinball, so on NVIDIA the proprietary driver (below) is
-    recommended instead. Older NVIDIA cards (Kepler, Maxwell, Pascal
-    &mdash; e.g. Quadro K-series, GTX 900/10-series) are not known to have a
-    working Vulkan driver here (untested with the newer Mesa): the kernel's
-    `nouveau` driver still runs the display, but Vulkan may fall back to
-    software (see below). Whether OpenGL on those cards is usable for
-    vpinball is untested.
+    for pinball, so on NVIDIA one of NVIDIA's drivers (below) is
+    recommended instead. Older NVIDIA cards (Maxwell, Pascal, Volta
+    &mdash; e.g. GTX 900/10-series) have no working Vulkan driver in Mesa:
+    use the **NVIDIA legacy** driver for those. Kepler and older (e.g.
+    Quadro K-series, GTX 600/700 except the 750) aren't supported.
 
-    **Recommended for NVIDIA:** NVIDIA's **proprietary driver**, which
-    is included in the image as well and switched on from the menu
-    ("GPU Driver"). It's what all current NVIDIA testers use. See
-    [NVIDIA video card support](#nvidia-video-card-support).
+    **Recommended for NVIDIA:** NVIDIA's own driver, included in the image
+    and switched on from the menu ("GPU Driver"): **NVIDIA proprietary**
+    for RTX 20/GTX 16 and newer, **NVIDIA legacy** for GTX 750 to
+    10-series. See [NVIDIA video card support](#nvidia-video-card-support).
 - **How to tell if your GPU is being used:** run `vulkaninfo --summary`. If
   the device is `llvmpipe` (or `lavapipe`), Vulkan is falling back to
   software rendering on the CPU &mdash; the GPU isn't supported, and it will
@@ -361,9 +365,22 @@ Prebuilt ISOs are published on the
 ### NVIDIA video card support
 
 Besides the open-source NVK driver above (the default, no install needed),
-every amd64 VPinOS install also carries NVIDIA's **proprietary** driver, and
-you can switch to it at runtime from the console menu (`vpinos-menu` &rarr;
-"GPU Driver" &rarr; "NVIDIA proprietary"). It's off unless you pick it. It is
+every amd64 VPinOS install also carries two NVIDIA drivers. You switch to
+one at runtime from the console menu (`vpinos-menu` &rarr; "Setup" &rarr;
+"GPU Driver"). Neither is used unless you pick it.
+
+| Your card | Pick |
+|---|---|
+| GeForce 16, 20, 30, 40, 50 series (Turing and newer) | **NVIDIA proprietary** |
+| GeForce 750/750 Ti, 900 series, 10 series, Titan V (Maxwell, Pascal, Volta) | **NVIDIA legacy** |
+| GeForce 600/700 series except the 750, and older (Kepler and earlier) | Not supported |
+
+Both need **Secure Boot turned off** in the firmware setup: the modules
+aren't signed, and the menu refuses to switch while Secure Boot is on.
+
+#### NVIDIA proprietary
+
+"GPU Driver" &rarr; "NVIDIA proprietary". It is
 NVIDIA's **615.71.09** driver from NVIDIA's own apt repository, using
 NVIDIA's open-source kernel module (NVIDIA no longer ships the closed one
 on this driver branch). The kernel module comes prebuilt for the exact
@@ -379,12 +396,34 @@ module supports Turing and newer GPUs:
 | Ada Lovelace        | 2022 | GeForce 40 series                        |
 | Blackwell           | 2025 | GeForce 50 series                        |
 
-Older cards (Kepler, Maxwell, Pascal &mdash; e.g. GTX 900/10-series and
-earlier) aren't supported by this proprietary path at all; they fall back to
-the default NVK/nouveau path above. The proprietary driver has been
-confirmed working well with Hyprland/Wayland on real NVIDIA hardware by
-multiple testers &mdash; see `notes/nvidia-proprietary.md` for the
-investigation history.
+Older cards aren't supported by this driver; use NVIDIA legacy (below).
+The proprietary driver has been confirmed working well with
+Hyprland/Wayland on real NVIDIA hardware by multiple testers &mdash; see
+`notes/nvidia-proprietary.md` for the investigation history.
+
+#### NVIDIA legacy
+
+"GPU Driver" &rarr; "NVIDIA legacy". NVIDIA's **580.x** driver series is
+the final branch to support the Maxwell, Pascal and Volta architectures,
+which the current driver above dropped. VPinOS ships **580.196.07**, with
+NVIDIA's closed kernel module prebuilt for the exact VPinOS kernel
+(packages `vpinos-nvidia-legacy` and `vpinos-nvidia-legacy-modules-<kernel>`).
+It's installed in its own directory (`/usr/lib/vpinos/nvidia-legacy`), next
+to the current driver, so switching between the two needs no reinstall and
+no reboot.
+
+| Architecture | GeForce and other cards |
+|---|---|
+| Maxwell (GMxxx) | GeForce GTX 750/750 Ti, GeForce 900 series (GTX 950, 960, 970, 980, 980 Ti), and the matching Quadro, Tesla and mobile GPUs |
+| Pascal (GPxxx) | GeForce 10 series (GT 1030, GTX 1050, 1060, 1070, 1080, 1080 Ti), and the matching Quadro and Tesla GPUs |
+| Volta (GVxxx) | TITAN V, Quadro GV100 and related Volta compute cards |
+
+The 580 driver also runs on Turing and newer cards, but on those use NVIDIA
+proprietary, which is newer and supports VR hardware encoding. Tested on a
+GTX 1050, a GTX 1060 and a GTX 1650.
+
+Limitation: **no VR hardware encoding (NVENC)** with the legacy driver.
+WiVRn encodes on the CPU instead (not yet tested with a headset).
 
 ## VR
 
@@ -410,7 +449,8 @@ the menu, so installations without a headset don't carry it.
    encoder libraries that match your GPU.
 3. **NVIDIA cards:** for hardware encoding (NVENC), also set **GPU Driver**
    to **NVIDIA proprietary**. It's in VR &rarr; Setup too. Without it,
-   WiVRn falls back to slower software encoding. AMD and Intel use VAAPI
+   WiVRn falls back to slower software encoding. With **NVIDIA legacy**
+   (GTX 750 to 10-series) it always uses software encoding. AMD and Intel use VAAPI
    hardware encoding with the default driver.
 
 On the **live** USB the VR components are lost at every reboot, like
@@ -535,8 +575,8 @@ those packages. The kernel is also pinned by its exact package name
 - The snapshot replaced the live mirror because the live mirror's kernel
   packages were caught mid-transition more than once, which broke builds.
 - The NVIDIA kernel modules come prebuilt for the exact kernel
-  (`vpinos-nvidia-modules-<kernel>`), so an installation never needs DKMS or a
-  compiler.
+  (`vpinos-nvidia-modules-<kernel>`, and `vpinos-nvidia-legacy-modules-<kernel>`
+  for the legacy driver), so an installation never needs DKMS or a compiler.
 - Backports are opt-in in Debian. To take any other package from the
   snapshot, ask for it explicitly: `sudo apt install -t trixie-backports <package>`.
 
