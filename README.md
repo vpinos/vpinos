@@ -133,7 +133,7 @@ Good to know:
   Write the stick again in DD mode. Ventoy, a DVD or a virtual machine's CD
   can't save settings either. The menu says which case applies.
 - Only settings are kept, not installed software: VR components, VPX Editor, vpxtool,
-  Pinscape-Cross and updates are still lost at reboot. Install VPinOS for those.
+  Pinscape-Cross, the SSF Speaker Test table and updates are still lost at reboot. Install VPinOS for those.
 - Writing the ISO to the stick again removes the saved settings.
 - Settings saved on the stick aren't copied when you install VPinOS from it.
 
@@ -207,9 +207,21 @@ configure it:
 
 ```
 1) Launch VPinball Example Table
-2) VPinFE                             (live session only)
-3) SSH Password Authentication: off   (live session only)
+2) SSF Speaker Test
+3) VPinFE                             (live session only)
+4) SSH Password Authentication: off   (live session only)
 ```
+
+"SSF Speaker Test" plays the
+[SSF Speaker Test table](https://github.com/superhac/vpx-ssf-test-table), for
+checking that a cabinet's 7.1 Surround Sound Feedback (SSF) speakers are
+wired and configured correctly: it plays a test sound on one speaker at a
+time (the flippers step through them) and shows the active speaker on the
+backglass. Set VPinball's playfield sound output to SSF on a 7.1 device for
+it to reach every speaker; the table's README lists the settings. It isn't
+in the image, so the first time you pick it the menu offers to install it
+(about 9 MB, needs internet). On a live USB it's gone after a reboot. It
+works on amd64 and arm64.
 
 VPinFE itself — the table-browsing frontend — is tucked into
 Testing on the live session (there's nowhere else to reach it from), but
