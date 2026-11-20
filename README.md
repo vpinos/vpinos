@@ -36,7 +36,7 @@
 >
 > **Coming from 1.0.x?** Moving to v1.1 needs **one fresh install**; there is
 > no in-place upgrade from 1.0.x. Back up your tables, `~/.config/vpinfe/` and
-> `~/.local/share/VPinballX/10.8/VPinballX.ini` first. After that, every
+> `~/.local/share/VPinballX/` (VPinball's settings) first. After that, every
 > update comes through the menu. See [Updates](#updates).
 
 > [!WARNING]
@@ -133,7 +133,7 @@ Good to know:
   Write the stick again in DD mode. Ventoy, a DVD or a virtual machine's CD
   can't save settings either. The menu says which case applies.
 - Only settings are kept, not installed software: VR components, VPX Editor, vpxtool,
-  Pinscape-Cross, the SSF Speaker Test table and updates are still lost at reboot. Install VPinOS for those.
+  Pinscape-Cross, the SSF Speaker Test and DOF Test tables and updates are still lost at reboot. Install VPinOS for those.
 - Writing the ISO to the stick again removes the saved settings.
 - Settings saved on the stick aren't copied when you install VPinOS from it.
 
@@ -208,8 +208,9 @@ configure it:
 ```
 1) Launch VPinball Example Table
 2) SSF Speaker Test
-3) VPinFE                             (live session only)
-4) SSH Password Authentication: off   (live session only)
+3) DOF Test
+4) VPinFE                             (live session only)
+5) SSH Password Authentication: off   (live session only)
 ```
 
 "SSF Speaker Test" plays the
@@ -222,6 +223,16 @@ it to reach every speaker; the table's README lists the settings. It isn't
 in the image, so the first time you pick it the menu offers to install it
 (about 9 MB, needs internet). On a live USB it's gone after a reboot. It
 works on amd64 and arm64.
+
+"DOF Test" plays the
+[DOF Test table](https://github.com/superhac/vpx-dof-test-table), for testing
+DirectOutput Framework (DOF) toys one at a time: the flipper buttons step
+through DOF events E901 to E990, only the selected one is on, and the
+backglass shows its number. The events come from the **pinupmenu** entry of
+your DOF Config Tool export, and VPinball's DOF plugin has to be enabled
+(VPXConfig, under Plugins). Like SSF Speaker Test it isn't in the image, so
+the first time you pick it the menu offers to install it (about 8 MB, needs
+internet), and on a live USB it's gone after a reboot.
 
 VPinFE itself — the table-browsing frontend — is tucked into
 Testing on the live session (there's nowhere else to reach it from), but
@@ -505,7 +516,7 @@ Encoder: nvenc   VPX VR: off
 
 Other VR settings (refresh rate, table position, passthrough, ...) are
 VPinball's own, in the `[PlayerVR]` section of
-`~/.local/share/VPinballX/10.8/VPinballX.ini`.
+`~/.local/share/VPinballX/10.9/VPinballX.ini` (VPinball 10.8 used `10.8/`).
 
 ## Sample tables
 
